@@ -1,0 +1,80 @@
+.TH BRARCHIVE 5 "@PACKAGE_VERSION@" "@PACKAGE_NAME@" "File Formats Manual"
+.SH NAME
+brarchive \- Bedrock Archive file format
+.SH DESCRIPTION
+The
+.B .brarchive
+format is a simple uncompressed text archive format used by Minecraft Bedrock Edition
+since version 1.21.40.20.  It is designed to store resource and behavior pack files
+in a single archive file.
+.PP
+The format consists of three main sections: a header, entry descriptors, and a data
+block.
+.SH HEADER
+The header is 16 bytes in size and contains:
+.TP
+.B Magic Number (8 bytes)
+The magic number
+.B 0x7d2725b1a0527026
+(little-endian) identifies the file as a
+.B .brarchive
+file.
+.TP
+.B Entry Count (4 bytes)
+The number of entries (files) in the archive, stored as a 32-bit little-endian integer.
+.TP
+.B Version (4 bytes)
+The archive format version number, currently always
+.BR 1 ,
+stored as a 32-bit little-endian integer.
+.SH ENTRIES
+Each entry descriptor is 256 bytes in size and contains:
+.TP
+.B Name Length (1 byte)
+The length of the entry name (0-247).
+.TP
+.B Name (247 bytes)
+The entry name (file path), UTF-8 encoded, padded with zeros.  The name can include
+directory separators (forward slashes) to represent nested directory structures.
+.TP
+.B Contents Offset (4 bytes)
+The offset of the file contents within the data block, relative to the start of the
+data block, stored as a 32-bit little-endian integer.
+.TP
+.B Contents Length (4 bytes)
+The length of the file contents in bytes, stored as a 32-bit little-endian integer.
+.PP
+The entry descriptors immediately follow the header.  The total size of the entry
+descriptors section is
+.B 256 * entry_count
+bytes.
+.SH DATA BLOCK
+The data block contains the actual file contents, stored as an uninterrupted stream
+of bytes.  Files are stored in UTF-8 encoding.  The data block starts immediately after
+the entry descriptors section.
+.PP
+To locate a file's contents:
+.IP 1. 4
+Read the entry descriptor to get the contents offset and length.
+.IP 2. 4
+Calculate the absolute offset:
+.B header_size + (256 * entry_count) + contents_offset
+.IP 3. 4
+Read
+.B contents_length
+bytes from that offset.
+.SH LIMITATIONS
+Maximum file name length is 247 bytes.  Files are stored as text (UTF-8), binary files
+may not work correctly.  No compression is used (uncompressed archive format).  Maximum
+number of entries is 2^32 - 1 (limited by 32-bit entry count).
+.SH SEE ALSO
+.BR @TOOL_NAME@ (1)
+.SH HISTORY
+The
+.B .brarchive
+format was introduced in Minecraft Bedrock Edition version 1.21.40.20 as a replacement
+for the previous package structure used for resource and behavior packs.
+.SH AUTHORS
+Torrekie <me@torrekie.dev>
+.br
+Based on the original Rust implementation by Lucy <theaddonn@gmail.com>

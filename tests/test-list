@@ -1,0 +1,32 @@
+#!/bin/sh
+# Test listing archive contents
+
+set -e
+
+TOOL="${TOOL_BINARY:-br_ar}"
+ARCHIVE="${TEST_SRCDIR}/recipes.brarchive"
+
+# Test basic listing
+"$TOOL" -t "$ARCHIVE" > /dev/null || exit 1
+
+# Test listing with filter
+"$TOOL" -t "$ARCHIVE" grindstone.json lodestone.json > /dev/null || exit 1
+
+# Test listing without - prefix
+"$TOOL" t "$ARCHIVE" > /dev/null || exit 1
+
+# Verify output contains expected files
+output=$("$TOOL" -t "$ARCHIVE")
+if ! echo "$output" | grep -q "grindstone.json"; then
+    echo "ERROR: grindstone.json not found in archive listing"
+    exit 1
+fi
+
+if ! echo "$output" | grep -q "lodestone.json"; then
+    echo "ERROR: lodestone.json not found in archive listing"
+    exit 1
+fi
+
+echo "test-list: PASSED"
+exit 0
+

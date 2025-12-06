@@ -1,0 +1,89 @@
+#!/bin/sh
+# Test creating archive
+
+set -e
+
+TOOL="${TOOL_BINARY:-br_ar}"
+TEST_DIR="${TEST_BUILDDIR}/test_output"
+ARCHIVE="${TEST_BUILDDIR}/test_archive.brarchive"
+
+# Clean up from previous runs
+rm -rf "$TEST_DIR" "$ARCHIVE"
+mkdir -p "$TEST_DIR"
+
+# Create test files
+echo '{"test": "file1"}' > "$TEST_DIR/file1.json"
+echo '{"test": "file2"}' > "$TEST_DIR/file2.json"
+mkdir -p "$TEST_DIR/subdir"
+echo '{"test": "nested"}' > "$TEST_DIR/subdir/nested.json"
+
+# Test creating archive
+"$TOOL" -r "$ARCHIVE" "$TEST_DIR" || exit 1
+
+# Verify archive was created
+if [ ! -f "$ARCHIVE" ]; then
+    echo "ERROR: Archive was not created"
+    exit 1
+fi
+
+# Verify archive can be listed
+list_output=$("$TOOL" -t "$ARCHIVE")
+if [ -z "$list_output" ]; then
+    echo "ERROR: Cannot list created archive"
+    exit 1
+fi
+
+# Verify all files are in archive
+if ! echo "$list_output" | grep -q "file1.json"; then
+    echo "ERROR: file1.json not in archive"
+    exit 1
+fi
+
+if ! echo "$list_output" | grep -q "file2.json"; then
+    echo "ERROR: file2.json not in archive"
+    exit 1
+fi
+
+if ! echo "$list_output" | grep -q "subdir/nested.json"; then
+    echo "ERROR: subdir/nested.json not in archive"
+    exit 1
+fi
+
+# Test silent create
+rm -f "$ARCHIVE"
+silent_output=$("$TOOL" rc "$ARCHIVE" "$TEST_DIR" 2>&1)
+if echo "$silent_output" | grep -q "Created archive"; then
+    echo "ERROR: Silent mode should not print 'Created archive'"
+    exit 1
+fi
+
+# Verify archive was still created
+if [ ! -f "$ARCHIVE" ]; then
+    echo "ERROR: Archive was not created in silent mode"
+    exit 1
+fi
+
+# Test round-trip: extract and verify content
+rm -rf "$TEST_DIR/extracted"
+mkdir -p "$TEST_DIR/extracted"
+cd "$TEST_DIR/extracted"
+
+"$TOOL" -x "$ARCHIVE" || exit 1
+
+if [ ! -f "file1.json" ] || [ ! -f "file2.json" ] || [ ! -f "subdir/nested.json" ]; then
+    echo "ERROR: Files not correctly extracted from created archive"
+    exit 1
+fi
+
+# Verify content matches
+if ! grep -q "file1" file1.json; then
+    echo "ERROR: file1.json content mismatch"
+    exit 1
+fi
+
+# Clean up
+rm -rf "$TEST_DIR" "$ARCHIVE"
+
+echo "test-create: PASSED"
+exit 0
+

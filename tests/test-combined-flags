@@ -1,0 +1,52 @@
+#!/bin/sh
+# Test combined flags and optional - prefix
+
+set -e
+
+TOOL="${TOOL_BINARY:-br_ar}"
+ARCHIVE="${TEST_SRCDIR}/recipes.brarchive"
+TEST_DIR="${TEST_BUILDDIR}/test_output"
+TEST_ARCHIVE="${TEST_BUILDDIR}/test_combined.brarchive"
+
+# Clean up
+rm -rf "$TEST_DIR" "$TEST_ARCHIVE"
+mkdir -p "$TEST_DIR"
+echo '{"test": "data"}' > "$TEST_DIR/test.json"
+
+# Test combined flags without - prefix
+"$TOOL" rc "$TEST_ARCHIVE" "$TEST_DIR" > /dev/null 2>&1 || exit 1
+
+if [ ! -f "$TEST_ARCHIVE" ]; then
+    echo "ERROR: Archive not created with 'rc' (combined flags, no -)"
+    exit 1
+fi
+
+# Test combined flags with - prefix
+rm -f "$TEST_ARCHIVE"
+"$TOOL" -rc "$TEST_ARCHIVE" "$TEST_DIR" > /dev/null 2>&1 || exit 1
+
+if [ ! -f "$TEST_ARCHIVE" ]; then
+    echo "ERROR: Archive not created with '-rc' (combined flags, with -)"
+    exit 1
+fi
+
+# Test listing without - prefix
+"$TOOL" t "$ARCHIVE" > /dev/null || exit 1
+
+# Test extracting with verbose
+rm -rf "$TEST_DIR/extracted"
+mkdir -p "$TEST_DIR/extracted"
+cd "$TEST_DIR/extracted"
+
+verbose_output=$("$TOOL" -xv "$TEST_ARCHIVE" 2>&1)
+if ! echo "$verbose_output" | grep -q "x -"; then
+    echo "ERROR: Verbose output not working with -xv"
+    exit 1
+fi
+
+# Clean up
+rm -rf "$TEST_DIR" "$TEST_ARCHIVE"
+
+echo "test-combined-flags: PASSED"
+exit 0
+

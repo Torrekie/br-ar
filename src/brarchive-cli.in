@@ -1,0 +1,175 @@
+#!/bin/sh
+# brarchive-cli - Drop-in wrapper for brarchive-cli compatibility
+#
+# Copyright (C) 2024  Torrekie <me@torrekie.dev>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# This wrapper is part of br-ar, which is based on the original Rust
+# implementation brarchive-cli by Lucy <theaddonn@gmail.com>
+# (https://github.com/theaddonn/brarchive-rs).
+#
+# Translates brarchive-cli commands to br-ar commands
+
+# Find the actual br-ar binary
+# First try to find it relative to this script
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TOOL_BINARY="${SCRIPT_DIR}/@TOOL_NAME@"
+
+# If not found, try br_ar (the actual binary name) in same directory
+if [ ! -x "$TOOL_BINARY" ]; then
+    TOOL_BINARY="${SCRIPT_DIR}/br_ar"
+fi
+
+# If still not found, try in PATH
+if [ ! -x "$TOOL_BINARY" ]; then
+    TOOL_BINARY="@TOOL_NAME@"
+    if ! command -v "$TOOL_BINARY" >/dev/null 2>&1; then
+        # Last resort: try br_ar in PATH
+        if command -v br_ar >/dev/null 2>&1; then
+            TOOL_BINARY="br_ar"
+        else
+            echo "Error: @TOOL_NAME@ or br_ar not found" >&2
+            exit 1
+        fi
+    fi
+fi
+
+# Handle subcommands
+case "$1" in
+    encode)
+        if [ "$#" -ne 3 ]; then
+            echo "Usage: brarchive-cli encode <input_folder> <output_file>" >&2
+            exit 1
+        fi
+        INPUT_FOLDER="$2"
+        OUTPUT_FILE="$3"
+        
+        if [ ! -d "$INPUT_FOLDER" ]; then
+            echo "Error: Input folder does not exist: $INPUT_FOLDER" >&2
+            exit 1
+        fi
+        
+        # Use br-ar -r (replace/create) with silent mode
+        exec "$TOOL_BINARY" -rc "$OUTPUT_FILE" "$INPUT_FOLDER"
+        ;;
+    
+    decode)
+        if [ "$#" -ne 3 ]; then
+            echo "Usage: brarchive-cli decode <input_file> <output_folder>" >&2
+            exit 1
+        fi
+        INPUT_FILE="$2"
+        OUTPUT_FOLDER="$3"
+        
+        # Convert to absolute paths
+        if [ ! -f "$INPUT_FILE" ]; then
+            echo "Error: Input file does not exist: $INPUT_FILE" >&2
+            exit 1
+        fi
+        
+        # Get absolute path of input file
+        INPUT_FILE_ABS=$(cd "$(dirname "$INPUT_FILE")" && pwd)/$(basename "$INPUT_FILE")
+        
+        # Create output folder if it doesn't exist
+        if [ ! -d "$OUTPUT_FOLDER" ]; then
+            mkdir -p "$OUTPUT_FOLDER" || {
+                echo "Error: Failed to create output folder: $OUTPUT_FOLDER" >&2
+                exit 1
+            }
+        fi
+        
+        # Get absolute path of output folder
+        OUTPUT_FOLDER_ABS=$(cd "$OUTPUT_FOLDER" && pwd)
+        
+        # Use br-ar -x to extract to the specified directory
+        # We need to extract to a temp dir first, then move to output folder
+        # because br-ar -x extracts to current directory
+        # POSIX-compliant mktemp usage (template must end in XXXXXX)
+        TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/brarchive.XXXXXX") || {
+            echo "Error: Failed to create temporary directory" >&2
+            exit 1
+        }
+        
+        # Extract to temp dir
+        cd "$TEMP_DIR" || {
+            echo "Error: Failed to change to temporary directory" >&2
+            rm -rf "$TEMP_DIR"
+            exit 1
+        }
+        
+        "$TOOL_BINARY" -x "$INPUT_FILE_ABS" || {
+            cd /
+            rm -rf "$TEMP_DIR"
+            exit 1
+        }
+        
+        # Move extracted files to output folder
+        # Use find to reliably enumerate all files and directories (POSIX-compliant)
+        # Find all entries, skip . (first line of output)
+        find . -print | sed '1d' | while IFS= read -r item; do
+            # Skip .. entries
+            case "$item" in
+                */..|..) continue ;;
+            esac
+            
+            # Move to output folder
+            mv "$item" "$OUTPUT_FOLDER_ABS/" 2>/dev/null || {
+                # If mv fails, try cp -r for directories
+                cp -r "$item" "$OUTPUT_FOLDER_ABS/" 2>/dev/null || {
+                    echo "Warning: Failed to move $item to output folder" >&2
+                }
+            }
+        done
+        
+        cd /
+        rm -rf "$TEMP_DIR"
+        ;;
+    
+    help|--help|-h)
+        cat <<EOF
+brarchive-cli - Bedrock Archive CLI Tool
+
+Usage:
+    brarchive-cli encode <input_folder> <output_file>
+        Create a .brarchive file from a directory
+        
+    brarchive-cli decode <input_file> <output_folder>
+        Extract a .brarchive file to a directory
+        
+    brarchive-cli help
+        Show this help message
+
+Examples:
+    brarchive-cli encode ./mydir ./pack.brarchive
+    brarchive-cli decode ./pack.brarchive ./output
+
+This is a compatibility wrapper for the brarchive-cli Rust crate interface.
+The underlying tool is @TOOL_NAME@.
+EOF
+        exit 0
+        ;;
+    
+    *)
+        if [ -z "$1" ]; then
+            echo "Error: No command specified" >&2
+            echo "Use 'brarchive-cli help' for usage information" >&2
+            exit 1
+        else
+            echo "Error: Unknown command: $1" >&2
+            echo "Use 'brarchive-cli help' for usage information" >&2
+            exit 1
+        fi
+        ;;
+esac

@@ -1,0 +1,24 @@
+br-ar - AUTHORS
+
+Copyright (C) 2024  Torrekie <me@torrekie.dev>
+
+This program is based on the original Rust implementation brarchive-cli
+by Lucy <theaddonn@gmail.com> (https://github.com/theaddonn/brarchive-rs).
+
+Original Project:
+  brarchive-cli - Rust implementation
+  Author: Lucy <theaddonn@gmail.com>
+  Repository: https://github.com/theaddonn/brarchive-rs
+
+Current Implementation:
+  br-ar - C implementation
+  Author: Torrekie <me@torrekie.dev>
+  
+Modifications from original:
+  - Complete rewrite in C11 for better portability and performance
+  - Uses GNU Autotools for cross-platform build system
+  - Implements ar(1)-like command-line interface
+  - Added delete operation support (-d)
+  - POSIX-compliant shell scripts for wrapper and tests
+  - Cross-platform endian handling with platform-specific optimizations
+  - Comprehensive test suite

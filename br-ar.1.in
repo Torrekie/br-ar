@@ -1,0 +1,79 @@
+.TH @TOOL_NAME@ 1 "@PACKAGE_VERSION@" "@PACKAGE_NAME@" "General Commands Manual"
+.SH NAME
+@TOOL_NAME@ \- create and maintain .brarchive files
+.SH SYNOPSIS
+.B @TOOL_NAME@
+\fB\-r\fR [\fB\-cv\fR] \fIarchive\fR \fIdirectory\fR
+.br
+.B @TOOL_NAME@
+\fB\-t\fR [\fB\-v\fR] \fIarchive\fR [\fIfile\fR ...]
+.br
+.B @TOOL_NAME@
+\fB\-x\fR [\fB\-v\fR] \fIarchive\fR [\fIfile\fR ...]
+.br
+.B @TOOL_NAME@
+\fB\-p\fR [\fB\-v\fR] \fIarchive\fR [\fIfile\fR ...]
+.br
+.B @TOOL_NAME@
+\fB\-d\fR [\fB\-v\fR] \fIarchive\fR \fIfile\fR ...
+.SH DESCRIPTION
+The
+.B @TOOL_NAME@
+utility creates and maintains groups of files combined into a
+.BR .brarchive
+archive.
+Once an archive has been created, new files can be added and existing files can be
+extracted, deleted, or replaced.
+.PP
+Files are named in the archive by their relative path from the source directory.
+When matching paths listed on the command line against file names stored in the
+archive, exact name matching is used.
+.PP
+The options are as follows:
+.TP
+.B \-c
+Whenever an archive is created, an informational message to that effect is written
+to standard error.  If the
+.B \-c
+option is specified,
+.B @TOOL_NAME@
+creates the archive silently.
+.TP
+.B \-d
+Delete the specified archive files.
+.TP
+.B \-p
+Write the contents of the specified archive files to the standard output.
+If no files are specified, all files in the archive are printed.
+.TP
+.B \-r
+Replace/add files in the archive.  If the archive does not exist, it is created.
+Takes a directory as argument and recursively includes all files from that directory.
+.TP
+.B \-t
+List the specified files in the order in which they appear in the archive.
+If no files are specified, all files in the archive are listed.
+.TP
+.B \-v
+Provide verbose output.  When used with
+.BR \-x ,
+.BR \-d ,
+or
+.BR \-r ,
+an informational message is printed for each file processed.
+.SH FILE FORMAT
+See
+.BR brarchive (5)
+for details on the
+.B .brarchive
+file format.
+.SH LIMITATIONS
+Maximum file name length is 247 bytes.  Files are stored as text (UTF-8), binary
+files may not work correctly.  No compression is used (uncompressed archive format).
+.SH SEE ALSO
+.BR brarchive (5),
+.BR ar (1)
+.SH AUTHORS
+Torrekie <me@torrekie.dev>
+.br
+Based on the original Rust implementation by Lucy <theaddonn@gmail.com>

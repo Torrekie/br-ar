@@ -1,0 +1,3 @@
+# Ensure test scripts are executable
+tests/test-* text eol=lf
+

@@ -1,0 +1,97 @@
+#!/bin/sh
+# Test deleting files from archive
+
+set -e
+
+TOOL="${TOOL_BINARY:-br_ar}"
+TEST_DIR="${TEST_BUILDDIR}/test_output"
+ARCHIVE="${TEST_BUILDDIR}/test_delete.brarchive"
+
+# Clean up from previous runs
+rm -rf "$TEST_DIR" "$ARCHIVE"
+mkdir -p "$TEST_DIR"
+
+# Create test files
+echo '{"test": "file1"}' > "$TEST_DIR/file1.json"
+echo '{"test": "file2"}' > "$TEST_DIR/file2.json"
+echo '{"test": "file3"}' > "$TEST_DIR/file3.json"
+
+# Create archive
+"$TOOL" -rc "$ARCHIVE" "$TEST_DIR" > /dev/null 2>&1 || exit 1
+
+# Verify archive was created
+if [ ! -f "$ARCHIVE" ]; then
+    echo "ERROR: Archive was not created"
+    exit 1
+fi
+
+# Verify all files are in archive
+list_output=$("$TOOL" -t "$ARCHIVE")
+if ! echo "$list_output" | grep -q "file1.json"; then
+    echo "ERROR: file1.json not in archive"
+    exit 1
+fi
+
+if ! echo "$list_output" | grep -q "file2.json"; then
+    echo "ERROR: file2.json not in archive"
+    exit 1
+fi
+
+if ! echo "$list_output" | grep -q "file3.json"; then
+    echo "ERROR: file3.json not in archive"
+    exit 1
+fi
+
+# Delete one file
+"$TOOL" -d "$ARCHIVE" file1.json || exit 1
+
+# Verify file1.json is deleted
+list_output=$("$TOOL" -t "$ARCHIVE")
+if echo "$list_output" | grep -q "file1.json"; then
+    echo "ERROR: file1.json should have been deleted"
+    exit 1
+fi
+
+# Verify other files still exist
+if ! echo "$list_output" | grep -q "file2.json"; then
+    echo "ERROR: file2.json should still be in archive"
+    exit 1
+fi
+
+if ! echo "$list_output" | grep -q "file3.json"; then
+    echo "ERROR: file3.json should still be in archive"
+    exit 1
+fi
+
+# Delete multiple files
+"$TOOL" -d "$ARCHIVE" file2.json file3.json || exit 1
+
+# Verify all files are deleted
+list_output=$("$TOOL" -t "$ARCHIVE")
+if [ -n "$list_output" ]; then
+    echo "ERROR: Archive should be empty after deleting all files"
+    exit 1
+fi
+
+# Test verbose delete
+rm -f "$ARCHIVE"
+"$TOOL" -rc "$ARCHIVE" "$TEST_DIR" > /dev/null 2>&1 || exit 1
+
+verbose_output=$("$TOOL" -dv "$ARCHIVE" file1.json 2>&1)
+if ! echo "$verbose_output" | grep -q "d - file1.json"; then
+    echo "ERROR: Verbose output not found"
+    exit 1
+fi
+
+# Test deleting non-existent file (should fail gracefully)
+if "$TOOL" -d "$ARCHIVE" nonexistent.json 2>/dev/null; then
+    echo "ERROR: Deleting non-existent file should fail"
+    exit 1
+fi
+
+# Clean up
+rm -rf "$TEST_DIR" "$ARCHIVE"
+
+echo "test-delete: PASSED"
+exit 0
+

@@ -1,0 +1,446 @@
+name: Release
+
+on:
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '\n\r ')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Detected version: $VERSION"
+          else
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+
+  build-windows:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [x86, x86_64, arm64]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            autoconf
+            automake
+            make
+            gcc
+            mingw-w64-x86_64-gcc
+            mingw-w64-i686-gcc
+            mingw-w64-ucrt-x86_64-gcc
+            clang
+      - name: Configure and build (x86_64)
+        if: matrix.arch == 'x86_64'
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
+          make -j$(nproc) || make
+      - name: Configure and build (x86)
+        if: matrix.arch == 'x86'
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw32/bin:$PATH"
+          autoreconf -fiv
+          ./configure --prefix=/usr --host=i686-w64-mingw32 CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(nproc) || make
+      - name: Configure and build (arm64)
+        if: matrix.arch == 'arm64'
+        shell: msys2 {0}
+        run: |
+          export PATH="/ucrt64/bin:$PATH"
+          autoreconf -fiv
+          ./configure --prefix=/usr --host=aarch64-w64-mingw32 CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(nproc) || make
+      - name: Install
+        shell: msys2 {0}
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create tarball
+        shell: msys2 {0}
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-windows-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz
+
+  build-windows-cygwin:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [x86, x86_64, arm64]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Cygwin
+        uses: egor-tensin/setup-cygwin@v3
+        with:
+          packages: autoconf automake make gcc-core gcc-g++ git
+      - name: Configure and build
+        shell: cygwin
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(nproc) || make
+      - name: Install
+        shell: cygwin
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create tarball
+        shell: cygwin
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-cygwin-${{ matrix.arch }}.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-cygwin-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-cygwin-${{ matrix.arch }}.tar.gz
+
+  build-linux-glibc:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake make gcc g++ libc6-dev
+      - name: Configure and build
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3 -march=native -static-libgcc" LDFLAGS="-static-libgcc"
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create tarball
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-linux-glibc-${{ matrix.arch }}.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-linux-glibc-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-linux-glibc-${{ matrix.arch }}.tar.gz
+
+  build-linux-musl:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools autoconf automake make
+      - name: Configure and build
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CC=musl-gcc CFLAGS="-O3 -static" LDFLAGS="-static"
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create tarball
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-linux-musl-${{ matrix.arch }}.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-linux-musl-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-linux-musl-${{ matrix.arch }}.tar.gz
+
+  build-android-termux:
+    needs: detect-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Android NDK
+        uses: android-actions/setup-android-ndk@v3
+        with:
+          ndk-version: '26.1.10909125'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake make
+      - name: Configure and build
+        run: |
+          export ANDROID_NDK_HOME=$ANDROID_NDK_ROOT
+          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          autoreconf -fiv
+          # Termux uses uclibc-like environment, build with static linking
+          ./configure --prefix=/usr --host=aarch64-linux-android21 CC=aarch64-linux-android21-clang CFLAGS="-O3 -static" LDFLAGS="-static"
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create deb package
+        run: |
+          mkdir -p ${{ runner.temp }}/deb/DEBIAN
+          echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Architecture: arm64" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
+          cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
+          dpkg-deb --build ${{ runner.temp }}/deb ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-android-termux-arm64.deb
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-android-termux-arm64
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-android-termux-arm64.deb
+
+  build-macos:
+    needs: detect-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          brew install autoconf automake
+      - name: Build arm64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          export CC="clang -target arm64-apple-darwin11.0"
+          export CXX="clang++ -target arm64-apple-darwin11.0"
+          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(sysctl -n hw.ncpu) || make
+          make install DESTDIR=${{ runner.temp }}/install-arm64
+      - name: Build x86_64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=10.10
+          export CC="clang -target x86_64-apple-darwin10.10"
+          export CXX="clang++ -target x86_64-apple-darwin10.10"
+          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(sysctl -n hw.ncpu) || make
+          make install DESTDIR=${{ runner.temp }}/install-x86_64
+      - name: Create universal binaries
+        run: |
+          mkdir -p ${{ runner.temp }}/install/usr/local
+          # Copy all files from arm64 build first
+          cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
+          # Find and replace Mach-O binaries with universal binaries
+          find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
+            rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
+            x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
+            output_file="${{ runner.temp }}/install/usr/local/$rel_path"
+            if [ -f "$x86_64_file" ]; then
+              # Check if both are Mach-O binaries
+              if file "$arm64_file" | grep -q "Mach-O" && file "$x86_64_file" | grep -q "Mach-O"; then
+                # Create universal binary
+                mkdir -p "$(dirname "$output_file")"
+                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file"
+              fi
+            fi
+          done
+      - name: Code sign
+        run: |
+          find ${{ runner.temp }}/install -type f | while read file; do
+            if file "$file" | grep -q "Mach-O"; then
+              codesign -f -s - "$file" || true
+            fi
+          done
+      - name: Create tarball
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-macos-universal
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.tar.gz
+
+  build-macos-pkg:
+    needs: detect-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          brew install autoconf automake
+      - name: Build arm64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          export CC="clang -target arm64-apple-darwin11.0"
+          export CXX="clang++ -target arm64-apple-darwin11.0"
+          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(sysctl -n hw.ncpu) || make
+          make install DESTDIR=${{ runner.temp }}/install-arm64
+      - name: Build x86_64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=10.10
+          export CC="clang -target x86_64-apple-darwin10.10"
+          export CXX="clang++ -target x86_64-apple-darwin10.10"
+          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(sysctl -n hw.ncpu) || make
+          make install DESTDIR=${{ runner.temp }}/install-x86_64
+      - name: Create universal binaries
+        run: |
+          mkdir -p ${{ runner.temp }}/install/usr/local
+          # Copy all files from arm64 build first
+          cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
+          # Find and replace Mach-O binaries with universal binaries
+          find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
+            rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
+            x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
+            output_file="${{ runner.temp }}/install/usr/local/$rel_path"
+            if [ -f "$x86_64_file" ]; then
+              # Check if both are Mach-O binaries
+              if file "$arm64_file" | grep -q "Mach-O" && file "$x86_64_file" | grep -q "Mach-O"; then
+                # Create universal binary
+                mkdir -p "$(dirname "$output_file")"
+                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file"
+              fi
+            fi
+          done
+      - name: Code sign
+        run: |
+          find ${{ runner.temp }}/install -type f | while read file; do
+            if file "$file" | grep -q "Mach-O"; then
+              codesign -f -s - "$file" || true
+            fi
+          done
+      - name: Create pkg installer
+        run: |
+          pkgbuild --root ${{ runner.temp }}/install \
+            --identifier dev.torrekie.br-ar \
+            --version ${{ needs.detect-version.outputs.version }} \
+            --install-location / \
+            ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.pkg
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-macos-pkg-universal
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.pkg
+
+  build-debian:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    container:
+      image: debian:oldstable-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y autoconf automake make gcc libc6-dev
+      - name: Configure and build
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3" LDFLAGS=""
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create deb package
+        run: |
+          mkdir -p ${{ runner.temp }}/deb/DEBIAN
+          echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Architecture: ${{ matrix.arch }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
+          cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
+          dpkg-deb --build ${{ runner.temp }}/deb ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-debian-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+
+  build-ubuntu:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y autoconf automake make gcc libc6-dev
+      - name: Configure and build
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3" LDFLAGS=""
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create deb package
+        run: |
+          mkdir -p ${{ runner.temp }}/deb/DEBIAN
+          echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Architecture: ${{ matrix.arch }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
+          cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
+          dpkg-deb --build ${{ runner.temp }}/deb ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-ubuntu-${{ matrix.arch }}.deb
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-ubuntu-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-ubuntu-${{ matrix.arch }}.deb
+
+  create-release:
+    needs: [detect-version, build-windows, build-windows-cygwin, build-linux-glibc, build-linux-musl, build-android-termux, build-macos, build-macos-pkg, build-debian, build-ubuntu]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.detect-version.outputs.version }}
+          name: Release v${{ needs.detect-version.outputs.version }}
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+

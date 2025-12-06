@@ -1,0 +1,6 @@
+Version 1.0.0
+=============
+
+Initial release of br-ar, a tool for creating, extracting, and listing
+Bedrock .brarchive files, compatible with the ar command interface.
+

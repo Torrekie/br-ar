@@ -1,0 +1,44 @@
+#!/bin/sh
+# Test printing archive contents
+
+set -e
+
+TOOL="${TOOL_BINARY:-br_ar}"
+ARCHIVE="${TEST_SRCDIR}/recipes.brarchive"
+
+# Test printing all files (should output all content)
+output=$("$TOOL" -p "$ARCHIVE")
+if [ -z "$output" ]; then
+    echo "ERROR: No output from print command"
+    exit 1
+fi
+
+# Test printing specific file
+output=$("$TOOL" -p "$ARCHIVE" grindstone.json)
+if [ -z "$output" ]; then
+    echo "ERROR: No output from print command for grindstone.json"
+    exit 1
+fi
+
+# Verify output is JSON
+if ! echo "$output" | head -1 | grep -q "{"; then
+    echo "ERROR: Printed content does not appear to be valid JSON"
+    exit 1
+fi
+
+# Verify output contains expected content
+if ! echo "$output" | grep -q "grindstone"; then
+    echo "ERROR: Printed content does not contain expected text"
+    exit 1
+fi
+
+# Test printing without - prefix
+output=$("$TOOL" p "$ARCHIVE" lodestone.json)
+if [ -z "$output" ]; then
+    echo "ERROR: No output from print command (without - prefix)"
+    exit 1
+fi
+
+echo "test-print: PASSED"
+exit 0
+

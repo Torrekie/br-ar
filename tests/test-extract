@@ -1,0 +1,70 @@
+#!/bin/sh
+# Test extracting from archive
+
+set -e
+
+TOOL="${TOOL_BINARY:-br_ar}"
+ARCHIVE="${TEST_SRCDIR}/recipes.brarchive"
+OUTPUT_DIR="${TEST_BUILDDIR}/test_extract_dir"
+
+# Clean up from previous runs
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+cd "$OUTPUT_DIR"
+
+# Test extracting all files
+"$TOOL" -x "$ARCHIVE" || exit 1
+
+# Verify files were extracted
+if [ ! -f "grindstone.json" ]; then
+    echo "ERROR: grindstone.json was not extracted"
+    exit 1
+fi
+
+if [ ! -f "lodestone.json" ]; then
+    echo "ERROR: lodestone.json was not extracted"
+    exit 1
+fi
+
+# Verify file content is valid JSON (basic check)
+if ! head -1 grindstone.json | grep -q "{"; then
+    echo "ERROR: grindstone.json does not appear to be valid JSON"
+    exit 1
+fi
+
+# Clean up
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+cd "$OUTPUT_DIR"
+
+# Test extracting specific files
+"$TOOL" -x "$ARCHIVE" grindstone.json lodestone.json || exit 1
+
+# Verify only requested files were extracted
+file_count=0
+for file in ./*; do
+    [ -f "$file" ] && file_count=$((file_count + 1))
+done
+if [ "$file_count" -ne 2 ]; then
+    echo "ERROR: Expected 2 files, found $file_count"
+    exit 1
+fi
+
+# Test verbose extract
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+cd "$OUTPUT_DIR"
+
+verbose_output=$("$TOOL" -xv "$ARCHIVE" grindstone.json 2>&1)
+if ! echo "$verbose_output" | grep -q "x - grindstone.json"; then
+    echo "ERROR: Verbose output not found"
+    exit 1
+fi
+
+# Clean up
+rm -rf "$OUTPUT_DIR"
+
+echo "test-extract: PASSED"
+exit 0
+
