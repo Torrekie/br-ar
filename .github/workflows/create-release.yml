@@ -170,6 +170,9 @@ jobs:
           echo "Current commit SHA: $CURRENT_SHA"
           echo "Branch: ${{ github.ref_name }}"
           echo ""
+          echo "Waiting 60 seconds for triggered workflows to appear in API..."
+          sleep 60
+          echo ""
           
           while true; do
             CURRENT_TIME=$(date +%s)
