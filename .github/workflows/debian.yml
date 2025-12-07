@@ -52,6 +52,7 @@ jobs:
           make install DESTDIR=${{ runner.temp }}/install
       - name: Create deb package
         run: |
+          apt-get install -y dpkg-dev
           mkdir -p ${{ runner.temp }}/deb/DEBIAN
           echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
           echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
@@ -59,7 +60,15 @@ jobs:
           echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
           echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
           cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
-          dpkg-deb --build ${{ runner.temp }}/deb ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+          DEB_FILE="${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb"
+          dpkg-deb --build ${{ runner.temp }}/deb "$DEB_FILE"
+          if [ ! -f "$DEB_FILE" ]; then
+            echo "Error: DEB file was not created at $DEB_FILE"
+            ls -la ${{ runner.temp }}/
+            exit 1
+          fi
+          echo "DEB file created: $DEB_FILE"
+          ls -lh "$DEB_FILE"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
