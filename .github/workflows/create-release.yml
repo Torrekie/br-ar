@@ -358,15 +358,15 @@ jobs:
           done
           
           # Move files from extracted directories to artifacts root
-          find . -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" \) -exec mv {} . \; 2>/dev/null || true
+          find . -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" -o -name "*.pkg" \) -exec mv {} . \; 2>/dev/null || true
           rm -rf extracted-* || true
           
           echo ""
           echo "Final artifacts:"
-          find . -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" \) | sort || echo "No artifacts found"
+          find . -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" -o -name "*.pkg" \) | sort || echo "No artifacts found"
           
           # Count artifacts
-          ARTIFACT_COUNT=$(find . -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" \) 2>/dev/null | wc -l || echo "0")
+          ARTIFACT_COUNT=$(find . -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" -o -name "*.pkg" \) 2>/dev/null | wc -l || echo "0")
           echo "Total artifacts collected: $ARTIFACT_COUNT"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -393,10 +393,10 @@ jobs:
       - name: List all collected artifacts
         run: |
           echo "Collected artifacts:"
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" \) 2>/dev/null | sort || echo "No artifacts found"
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" -o -name "*.pkg" \) 2>/dev/null | sort || echo "No artifacts found"
           echo ""
           echo "Artifact count:"
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" \) 2>/dev/null | wc -l || echo "0"
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" -o -name "*.deb" -o -name "*.pkg" \) 2>/dev/null | wc -l || echo "0"
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
