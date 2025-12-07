@@ -7,6 +7,14 @@ on:
         description: 'Version to release (leave empty to read from VERSION file)'
         required: false
         type: string
+      trigger_builds:
+        description: 'Trigger all build workflows before creating release'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
   push:
     paths:
       - 'VERSION'
@@ -39,15 +47,51 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
-  wait-for-builds:
+  trigger-builds:
     needs: detect-version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch' && (inputs.trigger_builds == 'true' || inputs.trigger_builds == '')
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Trigger all build workflows
+        run: |
+          WORKFLOWS=(
+            "windows.yml"
+            "macos.yml"
+            "linux-glibc.yml"
+            "linux-musl.yml"
+            "debian.yml"
+            "ubuntu.yml"
+            "android-termux.yml"
+          )
+          
+          for workflow_file in "${WORKFLOWS[@]}"; do
+            echo "Triggering workflow: $workflow_file"
+            gh workflow run "$workflow_file" --ref "${{ github.ref_name }}" || \
+            echo "Warning: Could not trigger $workflow_file"
+          done
+          
+          echo "All build workflows triggered. Waiting for them to start..."
+          sleep 30
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  wait-for-builds:
+    needs: [detect-version, trigger-builds]
+    runs-on: ubuntu-latest
+    if: always() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.trigger_builds == 'true' || inputs.trigger_builds == '')))
     steps:
       - name: Wait for build workflows to complete
         run: |
-          echo "Waiting 5 minutes for build workflows to complete..."
-          sleep 300
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "Waiting 5 minutes for build workflows to complete (triggered by VERSION change)..."
+            sleep 300
+          else
+            echo "Waiting 10 minutes for manually triggered build workflows to complete..."
+            sleep 600
+          fi
           echo "Wait complete - proceeding to collect artifacts"
 
   check-release-exists:
