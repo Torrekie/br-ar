@@ -7,6 +7,16 @@ on:
         description: 'Version to release (leave empty to read from VERSION file)'
         required: false
         type: string
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: create-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   detect-version:
@@ -29,11 +39,42 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
-  create-release:
+  wait-for-builds:
     needs: detect-version
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    if: github.event_name == 'push'
+    steps:
+      - name: Wait for build workflows to complete
+        run: |
+          echo "Waiting 5 minutes for build workflows to complete..."
+          sleep 300
+          echo "Wait complete - proceeding to collect artifacts"
+
+  check-release-exists:
+    runs-on: ubuntu-latest
+    needs: detect-version
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check if release already exists
+        id: check
+        run: |
+          VERSION="${{ needs.detect-version.outputs.version }}"
+          TAG="v${VERSION}"
+          if gh release view "$TAG" &>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release $TAG already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release $TAG does not exist yet"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  collect-artifacts:
+    needs: [detect-version, wait-for-builds, check-release-exists]
+    if: needs.check-release-exists.outputs.exists == 'false'
+    runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -41,6 +82,22 @@ jobs:
           path: artifacts
           pattern: br-ar-*
           merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  create-release:
+    needs: [detect-version, check-release-exists, collect-artifacts]
+    if: needs.check-release-exists.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: List all collected artifacts
+        run: |
+          echo "Collected artifacts:"
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" \) 2>/dev/null | sort || echo "No artifacts found"
+          echo ""
+          echo "Artifact count:"
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.tar.xz" -o -name "*.tar.bz2" \) 2>/dev/null | wc -l || echo "0"
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
@@ -50,4 +107,3 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-
