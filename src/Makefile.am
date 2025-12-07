@@ -14,15 +14,23 @@ all-local:
 
 # Install with configured name and optional wrappers/symlinks
 # On Windows, copy instead of symlink; on Unix, create symlink
+# After creating br-ar, remove br_ar so only br-ar exists
 install-exec-hook:
 	$(MKDIR_P) "$(DESTDIR)$(bindir)"
 	rm -f "$(DESTDIR)$(bindir)/$(TOOL_NAME)$(EXEEXT)"
 	@if test "$(EXEEXT)" = ".exe"; then \
 		cp "$(DESTDIR)$(bindir)/br_ar$(EXEEXT)" "$(DESTDIR)$(bindir)/$(TOOL_NAME)$(EXEEXT)" 2>/dev/null || \
 		cp $(DESTDIR)$(bindir)/br_ar$(EXEEXT) $(DESTDIR)$(bindir)/$(TOOL_NAME)$(EXEEXT); \
+		rm -f "$(DESTDIR)$(bindir)/br_ar$(EXEEXT)"; \
 	else \
-		(cd "$(DESTDIR)$(bindir)" && ln -sf br_ar$(EXEEXT) $(TOOL_NAME)$(EXEEXT)) || \
-		(cd $(DESTDIR)$(bindir) && ln -sf br_ar$(EXEEXT) $(TOOL_NAME)$(EXEEXT)); \
+		(cd "$(DESTDIR)$(bindir)" && \
+		rm -f $(TOOL_NAME)$(EXEEXT) && \
+		cp br_ar$(EXEEXT) $(TOOL_NAME)$(EXEEXT) && \
+		rm -f br_ar$(EXEEXT)) || \
+		(cd $(DESTDIR)$(bindir) && \
+		rm -f $(TOOL_NAME)$(EXEEXT) && \
+		cp br_ar$(EXEEXT) $(TOOL_NAME)$(EXEEXT) && \
+		rm -f br_ar$(EXEEXT)); \
 	fi
 	@if test "x$(ENABLE_SYMLINKS_VAL)" = "xyes"; then \
 		echo "Installing brarchive-cli wrapper and brarchive symlink..."; \

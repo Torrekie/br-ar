@@ -75,8 +75,10 @@ jobs:
       - name: Create universal binaries
         run: |
           mkdir -p ${{ runner.temp }}/install/usr/local
-          # Copy all files from arm64 build first
-          cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
+          # Copy all files from arm64 build first (except bin directory which we'll handle specially)
+          find ${{ runner.temp }}/install-arm64/usr/local -mindepth 1 -maxdepth 1 ! -name bin -exec cp -r {} ${{ runner.temp }}/install/usr/local/ \; 2>/dev/null || true
+          mkdir -p ${{ runner.temp }}/install/usr/local/bin
+          
           # Find br_ar binary and create universal br-ar
           arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
           x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
@@ -96,9 +98,28 @@ jobs:
               exit 1
             fi
           fi
-          # Handle any other Mach-O binaries
+          
+          # Remove any br_ar files that might have been copied
+          find ${{ runner.temp }}/install/usr/local -name "br_ar" -type f -delete
+          
+          # Create brarchive symlink to br-ar
+          if [ -f "$output_binary" ]; then
+            cd ${{ runner.temp }}/install/usr/local/bin
+            rm -f brarchive
+            ln -sf br-ar brarchive
+            echo "Created symlink: brarchive -> br-ar"
+          fi
+          
+          # Copy brarchive-cli script if it exists
+          if [ -f "${{ runner.temp }}/install-arm64/usr/local/bin/brarchive-cli" ]; then
+            cp "${{ runner.temp }}/install-arm64/usr/local/bin/brarchive-cli" "${{ runner.temp }}/install/usr/local/bin/brarchive-cli"
+            chmod +x "${{ runner.temp }}/install/usr/local/bin/brarchive-cli"
+            echo "Copied brarchive-cli script"
+          fi
+          
+          # Handle any other Mach-O binaries (excluding bin directory which we already handled)
           find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
-            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ]; then
+            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ] && [ "$(dirname "$arm64_file")" != "${{ runner.temp }}/install-arm64/usr/local/bin" ]; then
               rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
               x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
               output_file="${{ runner.temp }}/install/usr/local/$rel_path"
@@ -172,8 +193,10 @@ jobs:
       - name: Create universal binaries
         run: |
           mkdir -p ${{ runner.temp }}/install/usr/local
-          # Copy all files from arm64 build first
-          cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
+          # Copy all files from arm64 build first (except bin directory which we'll handle specially)
+          find ${{ runner.temp }}/install-arm64/usr/local -mindepth 1 -maxdepth 1 ! -name bin -exec cp -r {} ${{ runner.temp }}/install/usr/local/ \; 2>/dev/null || true
+          mkdir -p ${{ runner.temp }}/install/usr/local/bin
+          
           # Find br_ar binary and create universal br-ar
           arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
           x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
@@ -193,9 +216,28 @@ jobs:
               exit 1
             fi
           fi
-          # Handle any other Mach-O binaries
+          
+          # Remove any br_ar files that might have been copied
+          find ${{ runner.temp }}/install/usr/local -name "br_ar" -type f -delete
+          
+          # Create brarchive symlink to br-ar
+          if [ -f "$output_binary" ]; then
+            cd ${{ runner.temp }}/install/usr/local/bin
+            rm -f brarchive
+            ln -sf br-ar brarchive
+            echo "Created symlink: brarchive -> br-ar"
+          fi
+          
+          # Copy brarchive-cli script if it exists
+          if [ -f "${{ runner.temp }}/install-arm64/usr/local/bin/brarchive-cli" ]; then
+            cp "${{ runner.temp }}/install-arm64/usr/local/bin/brarchive-cli" "${{ runner.temp }}/install/usr/local/bin/brarchive-cli"
+            chmod +x "${{ runner.temp }}/install/usr/local/bin/brarchive-cli"
+            echo "Copied brarchive-cli script"
+          fi
+          
+          # Handle any other Mach-O binaries (excluding bin directory which we already handled)
           find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
-            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ]; then
+            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ] && [ "$(dirname "$arm64_file")" != "${{ runner.temp }}/install-arm64/usr/local/bin" ]; then
               rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
               x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
               output_file="${{ runner.temp }}/install/usr/local/$rel_path"
