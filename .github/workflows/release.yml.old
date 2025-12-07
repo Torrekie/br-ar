@@ -76,12 +76,30 @@ jobs:
       - name: Install
         shell: msys2 {0}
         run: |
-          make install DESTDIR=${{ runner.temp }}/install
+          INSTALL_DIR="${{ runner.temp }}/install"
+          mkdir -p "$INSTALL_DIR"
+          make install DESTDIR="$INSTALL_DIR"
       - name: Create tarball
         shell: msys2 {0}
         run: |
-          cd ${{ runner.temp }}/install
-          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz usr/
+          # MSYS2 automatically converts Windows paths
+          INSTALL_DIR="${{ runner.temp }}/install"
+          OUTPUT_DIR="${{ runner.temp }}"
+          OUTPUT_FILE="br-ar-${{ needs.detect-version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz"
+          if [ ! -d "$INSTALL_DIR" ]; then
+            echo "Error: Install directory does not exist: $INSTALL_DIR"
+            ls -la "${{ runner.temp }}" || true
+            exit 1
+          fi
+          if [ ! -d "$INSTALL_DIR/usr" ]; then
+            echo "Error: usr directory does not exist in install directory"
+            ls -la "$INSTALL_DIR" || true
+            exit 1
+          fi
+          cd "$INSTALL_DIR" || exit 1
+          # Create tarball in install directory first, then move to temp
+          tar czf "./$OUTPUT_FILE" usr/
+          mv "./$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -96,25 +114,44 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: false
       - name: Setup Cygwin
         uses: egor-tensin/setup-cygwin@v3
         with:
-          packages: autoconf automake make gcc-core gcc-g++ git
+          packages: autoconf automake make gcc-core gcc-g++ git dos2unix
+      - name: Fix line endings
+        shell: bash
+        run: |
+          command -v dos2unix >/dev/null 2>&1 && find . -type f \( -name "*.sh" -o -name "*.in" -o -name "configure.ac" -o -name "Makefile.am" -o -name "*.am" \) -print0 | xargs -0 dos2unix || echo "dos2unix not available, gitattributes should handle line endings"
       - name: Configure and build
-        shell: cygwin
+        shell: bash
         run: |
-          autoreconf -fiv
-          ./configure --prefix=/usr CFLAGS="-O3" CXXFLAGS="-O3"
-          make -j$(nproc) || make
+          autoreconf -fiv && ./configure --prefix=/usr CFLAGS='-O3' CXXFLAGS='-O3' && make -j$(nproc) || make
       - name: Install
-        shell: cygwin
+        shell: bash
         run: |
-          make install DESTDIR=${{ runner.temp }}/install
+          INSTALL_DIR=$(cygpath -u "${{ runner.temp }}/install" | xargs)
+          mkdir -p "$INSTALL_DIR"
+          make install DESTDIR="$INSTALL_DIR"
       - name: Create tarball
-        shell: cygwin
+        shell: bash
         run: |
-          cd ${{ runner.temp }}/install
-          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-cygwin-${{ matrix.arch }}.tar.gz usr/
+          INSTALL_DIR=$(cygpath -u "${{ runner.temp }}/install" | xargs)
+          OUTPUT_FILE=$(cygpath -u "${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-cygwin-${{ matrix.arch }}.tar.gz" | xargs)
+          if [ ! -d "$INSTALL_DIR" ]; then
+            echo "Error: Install directory does not exist: $INSTALL_DIR"
+            TEMP_DIR=$(cygpath -u "${{ runner.temp }}" | xargs)
+            ls -la "$TEMP_DIR" || true
+            exit 1
+          fi
+          if [ ! -d "$INSTALL_DIR/usr" ]; then
+            echo "Error: usr directory does not exist in install directory"
+            ls -la "$INSTALL_DIR" || true
+            exit 1
+          fi
+          cd "$INSTALL_DIR"
+          tar czf "$OUTPUT_FILE" usr/
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -187,16 +224,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Android NDK
-        uses: android-actions/setup-android-ndk@v3
-        with:
-          ndk-version: '26.1.10909125'
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26b" >> $GITHUB_ENV
+          echo "$PWD/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y autoconf automake make
+          sudo apt-get install -y autoconf automake make wget unzip
       - name: Configure and build
         run: |
-          export ANDROID_NDK_HOME=$ANDROID_NDK_ROOT
           export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           autoreconf -fiv
           # Termux uses uclibc-like environment, build with static linking
@@ -242,27 +280,62 @@ jobs:
         run: |
           autoreconf -fiv
           export MACOSX_DEPLOYMENT_TARGET=10.10
-          export CC="clang -target x86_64-apple-darwin10.10"
-          export CXX="clang++ -target x86_64-apple-darwin10.10"
-          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
-          make -j$(sysctl -n hw.ncpu) || make
-          make install DESTDIR=${{ runner.temp }}/install-x86_64
+          # Clean any previous build
+          make clean || true
+          # Use arch flag to force x86_64 build on arm64 runners
+          arch -x86_64 bash -c '
+            export CC="clang -target x86_64-apple-darwin10.10"
+            export CXX="clang++ -target x86_64-apple-darwin10.10"
+            ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+            make clean || true
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          ' || {
+            # Fallback: try without arch if not available
+            make clean || true
+            export CC="clang -target x86_64-apple-darwin10.10 -arch x86_64"
+            export CXX="clang++ -target x86_64-apple-darwin10.10 -arch x86_64"
+            ./configure --prefix=/usr/local CFLAGS="-O3 -arch x86_64" CXXFLAGS="-O3 -arch x86_64"
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          }
       - name: Create universal binaries
         run: |
           mkdir -p ${{ runner.temp }}/install/usr/local
           # Copy all files from arm64 build first
           cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
-          # Find and replace Mach-O binaries with universal binaries
+          # Find br_ar binary and create universal br-ar
+          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
+          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
+          output_binary="${{ runner.temp }}/install/usr/local/bin/br-ar"
+          if [ -f "$arm64_binary" ] && [ -f "$x86_64_binary" ]; then
+            # Verify architectures
+            arm64_arch=$(file "$arm64_binary" | grep -o "arm64" || echo "")
+            x86_64_arch=$(file "$x86_64_binary" | grep -o "x86_64" || echo "")
+            echo "arm64_binary: $(file "$arm64_binary")"
+            echo "x86_64_binary: $(file "$x86_64_binary")"
+            if [ -n "$arm64_arch" ] && [ -n "$x86_64_arch" ]; then
+              mkdir -p "$(dirname "$output_binary")"
+              lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
+              echo "Created universal binary: $output_binary"
+            else
+              echo "ERROR: Architectures don't match - cannot create universal binary"
+              exit 1
+            fi
+          fi
+          # Handle any other Mach-O binaries
           find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
-            rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
-            x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
-            output_file="${{ runner.temp }}/install/usr/local/$rel_path"
-            if [ -f "$x86_64_file" ]; then
-              # Check if both are Mach-O binaries
-              if file "$arm64_file" | grep -q "Mach-O" && file "$x86_64_file" | grep -q "Mach-O"; then
-                # Create universal binary
+            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ]; then
+              rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
+              x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
+              output_file="${{ runner.temp }}/install/usr/local/$rel_path"
+              if [ -f "$x86_64_file" ] && file "$x86_64_file" | grep -q "Mach-O"; then
                 mkdir -p "$(dirname "$output_file")"
-                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file"
+                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file" 2>/dev/null || cp "$arm64_file" "$output_file"
               fi
             fi
           done
@@ -304,27 +377,62 @@ jobs:
         run: |
           autoreconf -fiv
           export MACOSX_DEPLOYMENT_TARGET=10.10
-          export CC="clang -target x86_64-apple-darwin10.10"
-          export CXX="clang++ -target x86_64-apple-darwin10.10"
-          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
-          make -j$(sysctl -n hw.ncpu) || make
-          make install DESTDIR=${{ runner.temp }}/install-x86_64
+          # Clean any previous build
+          make clean || true
+          # Use arch flag to force x86_64 build on arm64 runners
+          arch -x86_64 bash -c '
+            export CC="clang -target x86_64-apple-darwin10.10"
+            export CXX="clang++ -target x86_64-apple-darwin10.10"
+            ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+            make clean || true
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          ' || {
+            # Fallback: try without arch if not available
+            make clean || true
+            export CC="clang -target x86_64-apple-darwin10.10 -arch x86_64"
+            export CXX="clang++ -target x86_64-apple-darwin10.10 -arch x86_64"
+            ./configure --prefix=/usr/local CFLAGS="-O3 -arch x86_64" CXXFLAGS="-O3 -arch x86_64"
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          }
       - name: Create universal binaries
         run: |
           mkdir -p ${{ runner.temp }}/install/usr/local
           # Copy all files from arm64 build first
           cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
-          # Find and replace Mach-O binaries with universal binaries
+          # Find br_ar binary and create universal br-ar
+          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
+          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
+          output_binary="${{ runner.temp }}/install/usr/local/bin/br-ar"
+          if [ -f "$arm64_binary" ] && [ -f "$x86_64_binary" ]; then
+            # Verify architectures
+            arm64_arch=$(file "$arm64_binary" | grep -o "arm64" || echo "")
+            x86_64_arch=$(file "$x86_64_binary" | grep -o "x86_64" || echo "")
+            echo "arm64_binary: $(file "$arm64_binary")"
+            echo "x86_64_binary: $(file "$x86_64_binary")"
+            if [ -n "$arm64_arch" ] && [ -n "$x86_64_arch" ]; then
+              mkdir -p "$(dirname "$output_binary")"
+              lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
+              echo "Created universal binary: $output_binary"
+            else
+              echo "ERROR: Architectures don't match - cannot create universal binary"
+              exit 1
+            fi
+          fi
+          # Handle any other Mach-O binaries
           find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
-            rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
-            x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
-            output_file="${{ runner.temp }}/install/usr/local/$rel_path"
-            if [ -f "$x86_64_file" ]; then
-              # Check if both are Mach-O binaries
-              if file "$arm64_file" | grep -q "Mach-O" && file "$x86_64_file" | grep -q "Mach-O"; then
-                # Create universal binary
+            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ]; then
+              rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
+              x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
+              output_file="${{ runner.temp }}/install/usr/local/$rel_path"
+              if [ -f "$x86_64_file" ] && file "$x86_64_file" | grep -q "Mach-O"; then
                 mkdir -p "$(dirname "$output_file")"
-                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file"
+                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file" 2>/dev/null || cp "$arm64_file" "$output_file"
               fi
             fi
           done

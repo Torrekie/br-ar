@@ -1,0 +1,68 @@
+name: Build Debian
+
+on:
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '\n\r ')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Detected version: $VERSION"
+          else
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+
+  build-debian:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    container:
+      image: debian:oldstable-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y autoconf automake make gcc libc6-dev
+      - name: Configure and build
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3" LDFLAGS=""
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create deb package
+        run: |
+          mkdir -p ${{ runner.temp }}/deb/DEBIAN
+          echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Architecture: ${{ matrix.arch }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
+          cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
+          dpkg-deb --build ${{ runner.temp }}/deb ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-debian-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+

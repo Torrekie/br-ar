@@ -1,0 +1,60 @@
+name: Build Linux (glibc)
+
+on:
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '\n\r ')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Detected version: $VERSION"
+          else
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+
+  build-linux-glibc:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake make gcc g++ libc6-dev
+      - name: Configure and build
+        run: |
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3 -march=native -static-libgcc" LDFLAGS="-static-libgcc"
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create tarball
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-linux-glibc-${{ matrix.arch }}.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-linux-glibc-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-linux-glibc-${{ matrix.arch }}.tar.gz
+

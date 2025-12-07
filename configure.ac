@@ -34,7 +34,7 @@ AC_C_INLINE
 AC_CHECK_HEADERS([sys/types.h sys/stat.h dirent.h unistd.h stdint.h stdbool.h limits.h errno.h])
 
 # Check for functions
-AC_CHECK_FUNCS([malloc realloc free strdup memset mkdir strrchr])
+AC_CHECK_FUNCS([malloc realloc free strdup memset mkdir strrchr getopt])
 
 # Check for types
 AC_TYPE_SIZE_T

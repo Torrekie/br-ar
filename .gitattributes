@@ -1,3 +1,9 @@
 # Ensure test scripts are executable
 tests/test-* text eol=lf
 
+# Ensure shell scripts and configure files use LF line endings
+*.sh text eol=lf
+*.in text eol=lf
+configure.ac text eol=lf
+Makefile.am text eol=lf
+*.am text eol=lf

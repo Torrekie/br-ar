@@ -1,0 +1,71 @@
+name: Build Android (Termux)
+
+on:
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '\n\r ')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Detected version: $VERSION"
+          else
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+
+  build-android-termux:
+    needs: detect-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Android NDK
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26b" >> $GITHUB_ENV
+          echo "$PWD/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake make wget unzip
+      - name: Configure and build
+        run: |
+          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          autoreconf -fiv
+          # Termux uses uclibc-like environment, build with static linking
+          ./configure --prefix=/usr --host=aarch64-linux-android21 CC=aarch64-linux-android21-clang CFLAGS="-O3 -static" LDFLAGS="-static"
+          make -j$(nproc) || make
+      - name: Install
+        run: |
+          make install DESTDIR=${{ runner.temp }}/install
+      - name: Create deb package
+        run: |
+          mkdir -p ${{ runner.temp }}/deb/DEBIAN
+          echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Architecture: arm64" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
+          echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
+          cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
+          dpkg-deb --build ${{ runner.temp }}/deb ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-android-termux-arm64.deb
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-android-termux-arm64
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-android-termux-arm64.deb
+

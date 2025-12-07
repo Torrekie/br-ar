@@ -4,27 +4,18 @@
 
 - autoconf
 - automake
-- make
-- gcc or compatible C compiler
+- GNU make
+- compatible C compiler (gcc, clang, etc.)
 
 ## Building
 
 The build system uses GNU autotools. You must generate the build files first:
 
 ```bash
-# Step 1: Generate build system files (creates configure, *.in files, etc.)
 autoreconf -fiv
-
-# Step 2: Configure for your system
 ./configure
-
-# Step 3: Build
 make
-
-# Step 4: Run tests (optional)
 make check
-
-# Step 5: Install (optional)
 make install
 ```
 
@@ -121,21 +112,6 @@ The test suite includes:
 - **test-delete**: Tests deleting files from archives
 
 All tests use the provided `recipes.brarchive` file as a test source.
-
-### Manual Testing
-
-After building, you can also test manually:
-
-```bash
-# Test listing
-./src/br_ar -t recipes.brarchive
-
-# Test extraction
-./src/br_ar -x recipes.brarchive file.json
-
-# Test creating archive
-./src/br_ar -r test.brarchive ./directory
-```
 
 **Note**: The built binary is named `br_ar` in the build directory, but it will be installed as `br-ar` (or the configured tool name) when you run `make install`.
 

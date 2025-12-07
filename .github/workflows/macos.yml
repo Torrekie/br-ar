@@ -1,0 +1,227 @@
+name: Build macOS
+
+on:
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '\n\r ')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Detected version: $VERSION"
+          else
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+
+  build-macos:
+    needs: detect-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          brew install autoconf automake
+      - name: Build arm64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          export CC="clang -target arm64-apple-darwin11.0"
+          export CXX="clang++ -target arm64-apple-darwin11.0"
+          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(sysctl -n hw.ncpu) || make
+          make install DESTDIR=${{ runner.temp }}/install-arm64
+      - name: Build x86_64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=10.10
+          # Clean any previous build
+          make clean || true
+          # Use arch flag to force x86_64 build on arm64 runners
+          arch -x86_64 bash -c '
+            export CC="clang -target x86_64-apple-darwin10.10"
+            export CXX="clang++ -target x86_64-apple-darwin10.10"
+            ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+            make clean || true
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          ' || {
+            # Fallback: try without arch if not available
+            make clean || true
+            export CC="clang -target x86_64-apple-darwin10.10 -arch x86_64"
+            export CXX="clang++ -target x86_64-apple-darwin10.10 -arch x86_64"
+            ./configure --prefix=/usr/local CFLAGS="-O3 -arch x86_64" CXXFLAGS="-O3 -arch x86_64"
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          }
+      - name: Create universal binaries
+        run: |
+          mkdir -p ${{ runner.temp }}/install/usr/local
+          # Copy all files from arm64 build first
+          cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
+          # Find br_ar binary and create universal br-ar
+          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
+          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
+          output_binary="${{ runner.temp }}/install/usr/local/bin/br-ar"
+          if [ -f "$arm64_binary" ] && [ -f "$x86_64_binary" ]; then
+            # Verify architectures
+            arm64_arch=$(file "$arm64_binary" | grep -o "arm64" || echo "")
+            x86_64_arch=$(file "$x86_64_binary" | grep -o "x86_64" || echo "")
+            echo "arm64_binary: $(file "$arm64_binary")"
+            echo "x86_64_binary: $(file "$x86_64_binary")"
+            if [ -n "$arm64_arch" ] && [ -n "$x86_64_arch" ]; then
+              mkdir -p "$(dirname "$output_binary")"
+              lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
+              echo "Created universal binary: $output_binary"
+            else
+              echo "ERROR: Architectures don't match - cannot create universal binary"
+              exit 1
+            fi
+          fi
+          # Handle any other Mach-O binaries
+          find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
+            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ]; then
+              rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
+              x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
+              output_file="${{ runner.temp }}/install/usr/local/$rel_path"
+              if [ -f "$x86_64_file" ] && file "$x86_64_file" | grep -q "Mach-O"; then
+                mkdir -p "$(dirname "$output_file")"
+                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file" 2>/dev/null || cp "$arm64_file" "$output_file"
+              fi
+            fi
+          done
+      - name: Code sign
+        run: |
+          find ${{ runner.temp }}/install -type f | while read file; do
+            if file "$file" | grep -q "Mach-O"; then
+              codesign -f -s - "$file" || true
+            fi
+          done
+      - name: Create tarball
+        run: |
+          cd ${{ runner.temp }}/install
+          tar czf ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.tar.gz usr/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-macos-universal
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.tar.gz
+
+  build-macos-pkg:
+    needs: detect-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          brew install autoconf automake
+      - name: Build arm64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          export CC="clang -target arm64-apple-darwin11.0"
+          export CXX="clang++ -target arm64-apple-darwin11.0"
+          ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(sysctl -n hw.ncpu) || make
+          make install DESTDIR=${{ runner.temp }}/install-arm64
+      - name: Build x86_64
+        run: |
+          autoreconf -fiv
+          export MACOSX_DEPLOYMENT_TARGET=10.10
+          # Clean any previous build
+          make clean || true
+          # Use arch flag to force x86_64 build on arm64 runners
+          arch -x86_64 bash -c '
+            export CC="clang -target x86_64-apple-darwin10.10"
+            export CXX="clang++ -target x86_64-apple-darwin10.10"
+            ./configure --prefix=/usr/local CFLAGS="-O3" CXXFLAGS="-O3"
+            make clean || true
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          ' || {
+            # Fallback: try without arch if not available
+            make clean || true
+            export CC="clang -target x86_64-apple-darwin10.10 -arch x86_64"
+            export CXX="clang++ -target x86_64-apple-darwin10.10 -arch x86_64"
+            ./configure --prefix=/usr/local CFLAGS="-O3 -arch x86_64" CXXFLAGS="-O3 -arch x86_64"
+            make -j$(sysctl -n hw.ncpu) || make
+            # Verify the binary is actually x86_64
+            file src/br_ar | grep -q "x86_64" || { echo "ERROR: Binary is not x86_64"; file src/br_ar; exit 1; }
+            make install DESTDIR=${{ runner.temp }}/install-x86_64
+          }
+      - name: Create universal binaries
+        run: |
+          mkdir -p ${{ runner.temp }}/install/usr/local
+          # Copy all files from arm64 build first
+          cp -r ${{ runner.temp }}/install-arm64/usr/local/* ${{ runner.temp }}/install/usr/local/ 2>/dev/null || true
+          # Find br_ar binary and create universal br-ar
+          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
+          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
+          output_binary="${{ runner.temp }}/install/usr/local/bin/br-ar"
+          if [ -f "$arm64_binary" ] && [ -f "$x86_64_binary" ]; then
+            # Verify architectures
+            arm64_arch=$(file "$arm64_binary" | grep -o "arm64" || echo "")
+            x86_64_arch=$(file "$x86_64_binary" | grep -o "x86_64" || echo "")
+            echo "arm64_binary: $(file "$arm64_binary")"
+            echo "x86_64_binary: $(file "$x86_64_binary")"
+            if [ -n "$arm64_arch" ] && [ -n "$x86_64_arch" ]; then
+              mkdir -p "$(dirname "$output_binary")"
+              lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
+              echo "Created universal binary: $output_binary"
+            else
+              echo "ERROR: Architectures don't match - cannot create universal binary"
+              exit 1
+            fi
+          fi
+          # Handle any other Mach-O binaries
+          find ${{ runner.temp }}/install-arm64/usr/local -type f | while read arm64_file; do
+            if file "$arm64_file" | grep -q "Mach-O" && [ "$(basename "$arm64_file")" != "br_ar" ]; then
+              rel_path=$(echo "$arm64_file" | sed "s|${{ runner.temp }}/install-arm64/usr/local/||")
+              x86_64_file="${{ runner.temp }}/install-x86_64/usr/local/$rel_path"
+              output_file="${{ runner.temp }}/install/usr/local/$rel_path"
+              if [ -f "$x86_64_file" ] && file "$x86_64_file" | grep -q "Mach-O"; then
+                mkdir -p "$(dirname "$output_file")"
+                lipo -create "$arm64_file" "$x86_64_file" -output "$output_file" 2>/dev/null || cp "$arm64_file" "$output_file"
+              fi
+            fi
+          done
+      - name: Code sign
+        run: |
+          find ${{ runner.temp }}/install -type f | while read file; do
+            if file "$file" | grep -q "Mach-O"; then
+              codesign -f -s - "$file" || true
+            fi
+          done
+      - name: Create pkg installer
+        run: |
+          pkgbuild --root ${{ runner.temp }}/install \
+            --identifier dev.torrekie.br-ar \
+            --version ${{ needs.detect-version.outputs.version }} \
+            --install-location / \
+            ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.pkg
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-macos-pkg-universal
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-macos-universal.pkg
+

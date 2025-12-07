@@ -30,12 +30,37 @@
 #include <config.h>
 #endif
 
+/* Feature test macros for POSIX and GNU extensions */
+/* Define before any includes to ensure getopt, strdup, etc. are available */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+
+/* Windows-specific includes before unistd.h to avoid conflicts */
+#ifdef _WIN32
+#include <io.h>
+#include <direct.h>
+#endif
+
 #include <unistd.h>
+
+/* getopt should be available via unistd.h with _POSIX_C_SOURCE */
+/* If not available, declare it */
+#ifdef HAVE_GETOPT
+/* getopt is available */
+#else
+/* getopt might still be available via unistd.h with feature test macros */
+/* If compilation fails, we'll need to provide an implementation */
+#endif
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -65,6 +90,26 @@
 
 #ifdef HAVE_ERRNO_H
 #include <errno.h>
+#endif
+
+/* Define PATH_MAX if not available */
+#ifndef PATH_MAX
+#ifdef _WIN32
+/* Windows MAX_PATH is 260, but we need extra space for separators */
+#define PATH_MAX 512
+#else
+#define PATH_MAX 4096
+#endif
+#endif
+
+/* Windows mkdir compatibility - Windows mkdir only takes one argument */
+#ifdef _WIN32
+/* Create a wrapper for POSIX-compatible mkdir */
+static int mkdir_with_mode(const char *path, mode_t mode) {
+    (void)mode; /* Windows ignores mode */
+    return _mkdir(path);
+}
+#define mkdir(path, mode) mkdir_with_mode(path, mode)
 #endif
 
 /* Platform-specific endian headers */

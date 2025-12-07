@@ -52,10 +52,3 @@ test_extract*/
 *.brarchive
 !recipes.brarchive
 !tests/recipes.brarchive
-
-# Editor backup files
-*~
-*.swp
-*.swo
-.*.sw?
-

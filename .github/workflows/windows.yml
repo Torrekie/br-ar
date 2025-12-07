@@ -1,0 +1,108 @@
+name: Build Windows (MSYS2)
+
+on:
+  push:
+    paths:
+      - 'VERSION'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '\n\r ')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Detected version: $VERSION"
+          else
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+
+  build-windows:
+    needs: detect-version
+    strategy:
+      matrix:
+        arch: [x86, x86_64, arm64]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            autoconf
+            automake
+            make
+            gcc
+            mingw-w64-x86_64-gcc
+            mingw-w64-i686-gcc
+            mingw-w64-ucrt-x86_64-gcc
+            clang
+      - name: Configure and build (x86_64)
+        if: matrix.arch == 'x86_64'
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          autoreconf -fiv
+          ./configure --prefix=/usr CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
+          make -j$(nproc) || make
+      - name: Configure and build (x86)
+        if: matrix.arch == 'x86'
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw32/bin:$PATH"
+          autoreconf -fiv
+          ./configure --prefix=/usr --host=i686-w64-mingw32 CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(nproc) || make
+      - name: Configure and build (arm64)
+        if: matrix.arch == 'arm64'
+        shell: msys2 {0}
+        run: |
+          export PATH="/ucrt64/bin:$PATH"
+          autoreconf -fiv
+          ./configure --prefix=/usr --host=aarch64-w64-mingw32 CFLAGS="-O3" CXXFLAGS="-O3"
+          make -j$(nproc) || make
+      - name: Install
+        shell: msys2 {0}
+        run: |
+          INSTALL_DIR="${{ runner.temp }}/install"
+          mkdir -p "$INSTALL_DIR"
+          make install DESTDIR="$INSTALL_DIR"
+      - name: Create tarball
+        shell: msys2 {0}
+        run: |
+          # MSYS2 automatically converts Windows paths
+          INSTALL_DIR="${{ runner.temp }}/install"
+          OUTPUT_DIR="${{ runner.temp }}"
+          OUTPUT_FILE="br-ar-${{ needs.detect-version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz"
+          if [ ! -d "$INSTALL_DIR" ]; then
+            echo "Error: Install directory does not exist: $INSTALL_DIR"
+            ls -la "${{ runner.temp }}" || true
+            exit 1
+          fi
+          if [ ! -d "$INSTALL_DIR/usr" ]; then
+            echo "Error: usr directory does not exist in install directory"
+            ls -la "$INSTALL_DIR" || true
+            exit 1
+          fi
+          cd "$INSTALL_DIR" || exit 1
+          # Create tarball in install directory first, then move to temp
+          tar czf "./$OUTPUT_FILE" usr/
+          mv "./$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-ar-windows-${{ matrix.arch }}
+          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz
+
