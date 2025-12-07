@@ -330,7 +330,13 @@ jobs:
                 echo "Found artifacts: $ARTIFACT_NAMES"
                 for artifact_id in $ARTIFACTS; do
                   echo "Downloading artifact ID: $artifact_id"
-                  gh api repos/${{ github.repository }}/actions/artifacts/$artifact_id/zip --output "artifacts/artifact-$artifact_id.zip" || echo "Failed to download artifact $artifact_id"
+                  # Use curl to download artifact, following redirects
+                  # The API endpoint redirects to a signed download URL
+                  curl -L \
+                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                    -H "Accept: application/vnd.github+json" \
+                    -o "artifacts/artifact-$artifact_id.zip" \
+                    "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$artifact_id/zip" || echo "Failed to download artifact $artifact_id"
                 done
               else
                 echo "No artifacts found in run $RUN_ID"
