@@ -169,9 +169,10 @@ jobs:
           
           echo "Current commit SHA: $CURRENT_SHA"
           echo "Branch: ${{ github.ref_name }}"
+          echo "Repository: ${{ github.repository }}"
           echo ""
           echo "Listing all recent workflow runs on this branch..."
-          gh run list --branch="${{ github.ref_name }}" --limit=10 --json workflowName,status,conclusion,createdAt,headSha --jq '.[] | "\(.workflowName): \(.status) (\(.conclusion // "none")) - \(.createdAt) - \(.headSha[0:7])"' || echo "Failed to list runs"
+          gh run list --repo="${{ github.repository }}" --branch="${{ github.ref_name }}" --limit=10 --json workflowName,status,conclusion,createdAt,headSha --jq '.[] | "\(.workflowName): \(.status) (\(.conclusion // "none")) - \(.createdAt) - \(.headSha[0:7])"' 2>&1 || echo "Failed to list runs"
           echo ""
           echo "Waiting 60 seconds for triggered workflows to appear in API..."
           # Sleep in small chunks to allow cancellation
@@ -199,16 +200,16 @@ jobs:
               
               # Get the most recent run for this workflow on the current branch
               # Look for runs created in the last 30 minutes (generous window for triggered workflows)
-              RUN_STATUS=$(gh run list --workflow="$workflow_file" --branch="${{ github.ref_name }}" --limit=20 --json status,conclusion,createdAt --jq ".[] | select(.createdAt | fromdateiso8601 > (now - 1800)) | \"\(.status)|\(.conclusion // \"none\")\"" 2>/dev/null | head -1 || echo "")
+              RUN_STATUS=$(gh run list --repo="${{ github.repository }}" --workflow="$workflow_file" --branch="${{ github.ref_name }}" --limit=20 --json status,conclusion,createdAt --jq ".[] | select(.createdAt | fromdateiso8601 > (now - 1800)) | \"\(.status)|\(.conclusion // \"none\")\"" 2>/dev/null | head -1 || echo "")
               
               # If not found by file name, try by workflow display name
               if [ -z "$RUN_STATUS" ]; then
-                RUN_STATUS=$(gh run list --workflow="$WORKFLOW_NAME" --branch="${{ github.ref_name }}" --limit=20 --json status,conclusion,createdAt --jq ".[] | select(.createdAt | fromdateiso8601 > (now - 1800)) | \"\(.status)|\(.conclusion // \"none\")\"" 2>/dev/null | head -1 || echo "")
+                RUN_STATUS=$(gh run list --repo="${{ github.repository }}" --workflow="$WORKFLOW_NAME" --branch="${{ github.ref_name }}" --limit=20 --json status,conclusion,createdAt --jq ".[] | select(.createdAt | fromdateiso8601 > (now - 1800)) | \"\(.status)|\(.conclusion // \"none\")\"" 2>/dev/null | head -1 || echo "")
               fi
               
               # If still not found, try without time filter (get most recent run)
               if [ -z "$RUN_STATUS" ]; then
-                RUN_STATUS=$(gh run list --workflow="$workflow_file" --branch="${{ github.ref_name }}" --limit=1 --json status,conclusion,createdAt --jq '.[0] | if . then "\(.status)|\(.conclusion // "none")" else "none|none" end' 2>/dev/null || echo "none|none")
+                RUN_STATUS=$(gh run list --repo="${{ github.repository }}" --workflow="$workflow_file" --branch="${{ github.ref_name }}" --limit=1 --json status,conclusion,createdAt --jq '.[0] | if . then "\(.status)|\(.conclusion // "none")" else "none|none" end' 2>/dev/null || echo "none|none")
               fi
               
               
@@ -309,12 +310,12 @@ jobs:
             echo "=== Looking for artifacts from workflow: $workflow_name ==="
             
             # First try to find a run from the same commit
-            RUN_ID=$(gh run list --workflow="$workflow_name" --branch="${{ github.ref_name }}" --commit="$CURRENT_SHA" --status=success --limit=1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+            RUN_ID=$(gh run list --repo="${{ github.repository }}" --workflow="$workflow_name" --branch="${{ github.ref_name }}" --commit="$CURRENT_SHA" --status=success --limit=1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
             
             # If not found, try to find the most recent successful run (within last 2 hours)
             if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "null" ]; then
               echo "No run found for commit $CURRENT_SHA, looking for recent successful runs..."
-              RUN_ID=$(gh run list --workflow="$workflow_name" --branch="${{ github.ref_name }}" --status=success --limit=5 --json databaseId,createdAt,headSha --jq '.[] | select(.createdAt | fromdateiso8601 > (now - 7200)) | .databaseId' 2>/dev/null | head -1 || echo "")
+              RUN_ID=$(gh run list --repo="${{ github.repository }}" --workflow="$workflow_name" --branch="${{ github.ref_name }}" --status=success --limit=5 --json databaseId,createdAt,headSha --jq '.[] | select(.createdAt | fromdateiso8601 > (now - 7200)) | .databaseId' 2>/dev/null | head -1 || echo "")
             fi
             
             if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
