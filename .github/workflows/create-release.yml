@@ -55,6 +55,12 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: Debug trigger conditions
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Trigger builds input: ${{ inputs.trigger_builds }}"
+          echo "Ref name: ${{ github.ref_name }}"
+          echo "Repository: ${{ github.repository }}"
       - name: Trigger all build workflows
         run: |
           WORKFLOWS=(
@@ -67,21 +73,53 @@ jobs:
             "android-termux.yml"
           )
           
+          TRIGGERED=0
+          FAILED=0
+          
           for workflow_file in "${WORKFLOWS[@]}"; do
-            echo "Triggering workflow: $workflow_file"
-            gh workflow run "$workflow_file" --ref "${{ github.ref_name }}" || \
-            echo "Warning: Could not trigger $workflow_file"
+            echo ""
+            echo "=== Triggering workflow: $workflow_file ==="
+            
+            # Get workflow ID from file name
+            WORKFLOW_ID=$(gh api repos/${{ github.repository }}/actions/workflows/"$workflow_file" --jq '.id' 2>/dev/null || echo "")
+            
+            if [ -n "$WORKFLOW_ID" ] && [ "$WORKFLOW_ID" != "null" ]; then
+              echo "Found workflow ID: $WORKFLOW_ID"
+              # Trigger workflow using API
+              if gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/dispatches \
+                --method POST \
+                -f ref="${{ github.ref_name }}" 2>&1; then
+                echo "✓ Successfully triggered $workflow_file"
+                TRIGGERED=$((TRIGGERED + 1))
+              else
+                echo "✗ Failed to trigger $workflow_file"
+                FAILED=$((FAILED + 1))
+              fi
+            else
+              echo "✗ Could not find workflow ID for $workflow_file"
+              FAILED=$((FAILED + 1))
+            fi
           done
           
-          echo "All build workflows triggered. Waiting for them to start..."
+          echo ""
+          echo "=== Summary ==="
+          echo "Successfully triggered: $TRIGGERED workflows"
+          echo "Failed: $FAILED workflows"
+          echo ""
+          echo "Waiting 30 seconds for workflows to start..."
           sleep 30
+          echo "You can check the Actions tab to see the triggered workflows."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   wait-for-builds:
     needs: [detect-version, trigger-builds]
     runs-on: ubuntu-latest
-    if: always() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.trigger_builds == 'true' || inputs.trigger_builds == '')))
+    if: |
+      always() && 
+      (github.event_name == 'push' || 
+       (github.event_name == 'workflow_dispatch' && 
+        (inputs.trigger_builds == 'true' || inputs.trigger_builds == '')))
     steps:
       - name: Wait for build workflows to complete
         run: |
@@ -90,6 +128,7 @@ jobs:
             sleep 300
           else
             echo "Waiting 10 minutes for manually triggered build workflows to complete..."
+            echo "Build workflows should be running now. Check the Actions tab to monitor their progress."
             sleep 600
           fi
           echo "Wait complete - proceeding to collect artifacts"
