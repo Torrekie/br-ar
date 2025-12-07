@@ -70,11 +70,14 @@ jobs:
           echo "DEB file created: $DEB_FILE"
           ls -lh "$DEB_FILE"
           # Copy to workspace so upload action (outside container) can access it
-          cp "$DEB_FILE" "${{ github.workspace }}/"
-          echo "Copied to workspace: ${{ github.workspace }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb"
+          # Use current directory (workspace) which is shared between container and host
+          DEB_FILENAME="br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb"
+          cp -v "$DEB_FILE" "./${DEB_FILENAME}"
+          echo "Copied to current directory: ./${DEB_FILENAME}"
+          ls -lh "./${DEB_FILENAME}" || echo "Warning: File not found after copy"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: br-ar-debian-${{ matrix.arch }}
-          path: ${{ github.workspace }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+          path: br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
 
