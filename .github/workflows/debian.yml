@@ -53,18 +53,18 @@ jobs:
       - name: Create deb package
         run: |
           apt-get install -y dpkg-dev
-          mkdir -p ${{ runner.temp }}/deb/DEBIAN
-          echo "Package: br-ar" > ${{ runner.temp }}/deb/DEBIAN/control
-          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ runner.temp }}/deb/DEBIAN/control
-          echo "Architecture: ${{ matrix.arch }}" >> ${{ runner.temp }}/deb/DEBIAN/control
-          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ runner.temp }}/deb/DEBIAN/control
-          echo "Description: Bedrock Archive Tool" >> ${{ runner.temp }}/deb/DEBIAN/control
-          cp -r ${{ runner.temp }}/install/usr ${{ runner.temp }}/deb/
-          DEB_FILE="${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb"
-          dpkg-deb --build ${{ runner.temp }}/deb "$DEB_FILE"
+          mkdir -p ${{ github.workspace }}/deb/DEBIAN
+          echo "Package: br-ar" > ${{ github.workspace }}/deb/DEBIAN/control
+          echo "Version: ${{ needs.detect-version.outputs.version }}" >> ${{ github.workspace }}/deb/DEBIAN/control
+          echo "Architecture: ${{ matrix.arch }}" >> ${{ github.workspace }}/deb/DEBIAN/control
+          echo "Maintainer: Torrekie <me@torrekie.dev>" >> ${{ github.workspace }}/deb/DEBIAN/control
+          echo "Description: Bedrock Archive Tool" >> ${{ github.workspace }}/deb/DEBIAN/control
+          cp -r ${{ runner.temp }}/install/usr ${{ github.workspace }}/deb/
+          DEB_FILE="${{ github.workspace }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb"
+          dpkg-deb --build ${{ github.workspace }}/deb "$DEB_FILE"
           if [ ! -f "$DEB_FILE" ]; then
             echo "Error: DEB file was not created at $DEB_FILE"
-            ls -la ${{ runner.temp }}/
+            ls -la ${{ github.workspace }}/
             exit 1
           fi
           echo "DEB file created: $DEB_FILE"
@@ -73,5 +73,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: br-ar-debian-${{ matrix.arch }}
-          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+          path: ${{ github.workspace }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
 
