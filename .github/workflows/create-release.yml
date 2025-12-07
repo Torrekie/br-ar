@@ -54,6 +54,8 @@ jobs:
     permissions:
       actions: write
       contents: read
+    outputs:
+      workflow_files: ${{ steps.trigger.outputs.workflow_files }}
     steps:
       - name: Debug trigger conditions
         run: |
@@ -62,6 +64,7 @@ jobs:
           echo "Ref name: ${{ github.ref_name }}"
           echo "Repository: ${{ github.repository }}"
       - name: Trigger all build workflows
+        id: trigger
         run: |
           WORKFLOWS=(
             "windows.yml"
@@ -75,6 +78,7 @@ jobs:
           
           TRIGGERED=0
           FAILED=0
+          WORKFLOW_FILES=""
           
           for workflow_file in "${WORKFLOWS[@]}"; do
             echo ""
@@ -91,6 +95,11 @@ jobs:
                 -f ref="${{ github.ref_name }}" 2>&1; then
                 echo "✓ Successfully triggered $workflow_file"
                 TRIGGERED=$((TRIGGERED + 1))
+                if [ -n "$WORKFLOW_FILES" ]; then
+                  WORKFLOW_FILES="${WORKFLOW_FILES} ${workflow_file}"
+                else
+                  WORKFLOW_FILES="${workflow_file}"
+                fi
               else
                 echo "✗ Failed to trigger $workflow_file"
                 FAILED=$((FAILED + 1))
@@ -109,6 +118,8 @@ jobs:
           echo "Waiting 30 seconds for workflows to start..."
           sleep 30
           echo "You can check the Actions tab to see the triggered workflows."
+          
+          echo "workflow_files=$WORKFLOW_FILES" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -120,18 +131,97 @@ jobs:
       (github.event_name == 'push' || 
        (github.event_name == 'workflow_dispatch' && 
         (inputs.trigger_builds == 'true' || inputs.trigger_builds == '')))
+    permissions:
+      actions: read
     steps:
       - name: Wait for build workflows to complete
         run: |
+          # Map workflow files to workflow names
+          declare -A WORKFLOW_NAMES=(
+            ["windows.yml"]="Build Windows (MSYS2)"
+            ["macos.yml"]="Build macOS"
+            ["linux-glibc.yml"]="Build Linux (glibc)"
+            ["linux-musl.yml"]="Build Linux (musl)"
+            ["debian.yml"]="Build Debian"
+            ["ubuntu.yml"]="Build Ubuntu"
+            ["android-termux.yml"]="Build Android (Termux)"
+          )
+          
           if [ "${{ github.event_name }}" == "push" ]; then
-            echo "Waiting 5 minutes for build workflows to complete (triggered by VERSION change)..."
-            sleep 300
+            # For push events, check all workflows
+            WORKFLOWS=("windows.yml" "macos.yml" "linux-glibc.yml" "linux-musl.yml" "debian.yml" "ubuntu.yml" "android-termux.yml")
+            echo "Waiting for build workflows to complete (triggered by VERSION change)..."
           else
-            echo "Waiting 10 minutes for manually triggered build workflows to complete..."
-            echo "Build workflows should be running now. Check the Actions tab to monitor their progress."
-            sleep 600
+            # For manual triggers, use the workflows that were actually triggered
+            TRIGGERED_WORKFLOWS="${{ needs.trigger-builds.outputs.workflow_files }}"
+            if [ -z "$TRIGGERED_WORKFLOWS" ]; then
+              echo "No workflows were triggered, proceeding immediately"
+              exit 0
+            fi
+            read -ra WORKFLOWS <<< "$TRIGGERED_WORKFLOWS"
+            echo "Waiting for manually triggered build workflows to complete..."
           fi
-          echo "Wait complete - proceeding to collect artifacts"
+          
+          MAX_WAIT=1800  # 30 minutes maximum
+          POLL_INTERVAL=30  # Check every 30 seconds
+          START_TIME=$(date +%s)
+          
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            
+            if [ $ELAPSED -ge $MAX_WAIT ]; then
+              echo "Timeout reached (${MAX_WAIT}s). Proceeding with available artifacts."
+              break
+            fi
+            
+            ALL_COMPLETE=true
+            IN_PROGRESS=0
+            COMPLETED=0
+            FAILED=0
+            
+            for workflow_file in "${WORKFLOWS[@]}"; do
+              WORKFLOW_NAME="${WORKFLOW_NAMES[$workflow_file]}"
+              
+              # Get the most recent run for this workflow on the current branch
+              RUN_STATUS=$(gh run list --workflow="$WORKFLOW_NAME" --branch="${{ github.ref_name }}" --limit=1 --json status,conclusion --jq '.[0] | "\(.status)|\(.conclusion // "none")"' 2>/dev/null || echo "none|none")
+              
+              STATUS=$(echo "$RUN_STATUS" | cut -d'|' -f1)
+              CONCLUSION=$(echo "$RUN_STATUS" | cut -d'|' -f2)
+              
+              if [ "$STATUS" == "completed" ]; then
+                if [ "$CONCLUSION" == "success" ]; then
+                  echo "  ✓ $workflow_file: completed successfully"
+                  COMPLETED=$((COMPLETED + 1))
+                else
+                  echo "  ✗ $workflow_file: completed with $CONCLUSION"
+                  FAILED=$((FAILED + 1))
+                fi
+              elif [ "$STATUS" == "in_progress" ] || [ "$STATUS" == "queued" ]; then
+                echo "  ⏳ $workflow_file: $STATUS"
+                IN_PROGRESS=$((IN_PROGRESS + 1))
+                ALL_COMPLETE=false
+              else
+                echo "  ? $workflow_file: $STATUS"
+                ALL_COMPLETE=false
+              fi
+            done
+            
+            echo ""
+            echo "Status: $COMPLETED completed, $IN_PROGRESS in progress, $FAILED failed"
+            echo "Elapsed: ${ELAPSED}s / ${MAX_WAIT}s"
+            
+            if [ "$ALL_COMPLETE" == "true" ]; then
+              echo ""
+              echo "All workflows have completed. Proceeding to collect artifacts."
+              break
+            fi
+            
+            echo "Waiting ${POLL_INTERVAL} seconds before next check..."
+            sleep $POLL_INTERVAL
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   check-release-exists:
     runs-on: ubuntu-latest
