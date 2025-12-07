@@ -171,7 +171,10 @@ jobs:
           echo "Branch: ${{ github.ref_name }}"
           echo ""
           echo "Waiting 60 seconds for triggered workflows to appear in API..."
-          sleep 60
+          # Sleep in small chunks to allow cancellation
+          for i in {1..12}; do
+            sleep 5
+          done
           echo ""
           
           while true; do
@@ -244,7 +247,12 @@ jobs:
             fi
             
             echo "Waiting ${POLL_INTERVAL} seconds before next check..."
-            sleep $POLL_INTERVAL
+            # Sleep in small chunks to allow cancellation
+            CHUNK_SIZE=5
+            ITERATIONS=$((POLL_INTERVAL / CHUNK_SIZE))
+            for i in $(seq 1 $ITERATIONS); do
+              sleep $CHUNK_SIZE
+            done
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
