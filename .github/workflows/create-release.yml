@@ -133,6 +133,7 @@ jobs:
         (inputs.trigger_builds == 'true' || inputs.trigger_builds == '')))
     permissions:
       actions: read
+      contents: read
     steps:
       - name: Wait for build workflows to complete
         run: |
