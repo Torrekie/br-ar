@@ -162,7 +162,7 @@ jobs:
             echo "Waiting for manually triggered build workflows to complete..."
           fi
           
-          MAX_WAIT=1800  # 30 minutes maximum
+          MAX_WAIT=900  # 15 minutes maximum
           POLL_INTERVAL=30  # Check every 30 seconds
           START_TIME=$(date +%s)
           
