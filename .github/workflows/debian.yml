@@ -69,9 +69,12 @@ jobs:
           fi
           echo "DEB file created: $DEB_FILE"
           ls -lh "$DEB_FILE"
+          # Copy to workspace so upload action (outside container) can access it
+          cp "$DEB_FILE" "${{ github.workspace }}/"
+          echo "Copied to workspace: ${{ github.workspace }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: br-ar-debian-${{ matrix.arch }}
-          path: ${{ runner.temp }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
+          path: ${{ github.workspace }}/br-ar-${{ needs.detect-version.outputs.version }}-debian-${{ matrix.arch }}.deb
 
