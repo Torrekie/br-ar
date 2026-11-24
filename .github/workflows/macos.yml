@@ -79,25 +79,16 @@ jobs:
           find ${{ runner.temp }}/install-arm64/usr/local -mindepth 1 -maxdepth 1 ! -name bin -exec cp -r {} ${{ runner.temp }}/install/usr/local/ \; 2>/dev/null || true
           mkdir -p ${{ runner.temp }}/install/usr/local/bin
           
-          # Find br_ar binary and create universal br-ar
-          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
-          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
+          # Combine the installed br-ar binaries.
+          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br-ar"
+          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br-ar"
           output_binary="${{ runner.temp }}/install/usr/local/bin/br-ar"
-          if [ -f "$arm64_binary" ] && [ -f "$x86_64_binary" ]; then
-            # Verify architectures
-            arm64_arch=$(file "$arm64_binary" | grep -o "arm64" || echo "")
-            x86_64_arch=$(file "$x86_64_binary" | grep -o "x86_64" || echo "")
-            echo "arm64_binary: $(file "$arm64_binary")"
-            echo "x86_64_binary: $(file "$x86_64_binary")"
-            if [ -n "$arm64_arch" ] && [ -n "$x86_64_arch" ]; then
-              mkdir -p "$(dirname "$output_binary")"
-              lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
-              echo "Created universal binary: $output_binary"
-            else
-              echo "ERROR: Architectures don't match - cannot create universal binary"
-              exit 1
-            fi
+          if ! lipo "$arm64_binary" -verify_arch arm64 || ! lipo "$x86_64_binary" -verify_arch x86_64; then
+            echo "ERROR: Missing or invalid installed br-ar binary"
+            exit 1
           fi
+          lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
+          echo "Created universal binary: $output_binary"
           
           # Remove any br_ar files that might have been copied
           find ${{ runner.temp }}/install/usr/local -name "br_ar" -type f -delete
@@ -197,25 +188,16 @@ jobs:
           find ${{ runner.temp }}/install-arm64/usr/local -mindepth 1 -maxdepth 1 ! -name bin -exec cp -r {} ${{ runner.temp }}/install/usr/local/ \; 2>/dev/null || true
           mkdir -p ${{ runner.temp }}/install/usr/local/bin
           
-          # Find br_ar binary and create universal br-ar
-          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br_ar"
-          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br_ar"
+          # Combine the installed br-ar binaries.
+          arm64_binary="${{ runner.temp }}/install-arm64/usr/local/bin/br-ar"
+          x86_64_binary="${{ runner.temp }}/install-x86_64/usr/local/bin/br-ar"
           output_binary="${{ runner.temp }}/install/usr/local/bin/br-ar"
-          if [ -f "$arm64_binary" ] && [ -f "$x86_64_binary" ]; then
-            # Verify architectures
-            arm64_arch=$(file "$arm64_binary" | grep -o "arm64" || echo "")
-            x86_64_arch=$(file "$x86_64_binary" | grep -o "x86_64" || echo "")
-            echo "arm64_binary: $(file "$arm64_binary")"
-            echo "x86_64_binary: $(file "$x86_64_binary")"
-            if [ -n "$arm64_arch" ] && [ -n "$x86_64_arch" ]; then
-              mkdir -p "$(dirname "$output_binary")"
-              lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
-              echo "Created universal binary: $output_binary"
-            else
-              echo "ERROR: Architectures don't match - cannot create universal binary"
-              exit 1
-            fi
+          if ! lipo "$arm64_binary" -verify_arch arm64 || ! lipo "$x86_64_binary" -verify_arch x86_64; then
+            echo "ERROR: Missing or invalid installed br-ar binary"
+            exit 1
           fi
+          lipo -create "$arm64_binary" "$x86_64_binary" -output "$output_binary"
+          echo "Created universal binary: $output_binary"
           
           # Remove any br_ar files that might have been copied
           find ${{ runner.temp }}/install/usr/local -name "br_ar" -type f -delete
