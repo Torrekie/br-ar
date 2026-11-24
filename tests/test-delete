@@ -73,13 +73,28 @@ if [ -n "$list_output" ]; then
     exit 1
 fi
 
-# Test verbose delete
-rm -f "$ARCHIVE"
-"$TOOL" -rc "$ARCHIVE" "$TEST_DIR" > /dev/null 2>&1 || exit 1
+# Test verbose delete with more than 16 files remaining
+FIXTURE="${TEST_SRCDIR}/recipes.brarchive"
+cp "$FIXTURE" "$ARCHIVE"
+list_output=$("$TOOL" -t "$FIXTURE")
+expected_list=$(printf '%s\n' "$list_output" | sed '/^stonecutter_mossy_stonebrick_stairs\.json$/d')
 
-verbose_output=$("$TOOL" -dv "$ARCHIVE" file1.json 2>&1)
-if ! echo "$verbose_output" | grep -q "d - file1.json"; then
+verbose_output=$("$TOOL" -dv "$ARCHIVE" stonecutter_mossy_stonebrick_stairs.json 2>&1)
+if [ "$verbose_output" != "d - stonecutter_mossy_stonebrick_stairs.json" ]; then
     echo "ERROR: Verbose output not found"
+    exit 1
+fi
+
+list_output=$("$TOOL" -t "$ARCHIVE")
+if [ "$list_output" != "$expected_list" ]; then
+    echo "ERROR: Unexpected archive contents after verbose delete"
+    exit 1
+fi
+
+"$TOOL" -p "$FIXTURE" stonecutter_polished_diorite_slab2.json > "$TEST_DIR/expected"
+"$TOOL" -p "$ARCHIVE" stonecutter_polished_diorite_slab2.json > "$TEST_DIR/actual"
+if ! cmp -s "$TEST_DIR/expected" "$TEST_DIR/actual"; then
+    echo "ERROR: Retained file contents changed after verbose delete"
     exit 1
 fi
 

@@ -32,8 +32,12 @@ jobs:
     needs: detect-version
     strategy:
       matrix:
-        arch: [x86_64, arm64]
-    runs-on: ubuntu-latest
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -43,7 +47,7 @@ jobs:
       - name: Configure and build
         run: |
           autoreconf -fiv
-          ./configure --prefix=/usr CFLAGS="-O3 -march=native -static-libgcc" LDFLAGS="-static-libgcc"
+          ./configure --prefix=/usr CFLAGS="-O3 -static-libgcc" LDFLAGS="-static-libgcc"
           make -j$(nproc) || make
       - name: Install
         run: |

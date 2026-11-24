@@ -896,144 +896,104 @@ static bool delete_from_archive(const char *archive_path, char **files_to_delete
         return false;
     }
     
-    /* Collect entries to keep */
-    struct file_list files;
-    file_list_init(&files);
-    
-    size_t entry_offset = HEADER_SIZE;
-    size_t data_block_start = HEADER_SIZE + (ENTRY_SIZE * entries);
-    uint32_t i;
-    int deleted_count = 0;
-    
+    if (entries > (archive_size - HEADER_SIZE) / ENTRY_SIZE) {
+        fprintf(stderr, "Archive corrupted: entry table out of bounds\n");
+        free(archive_data);
+        return false;
+    }
+
+    uint8_t *entry_table = archive_data + HEADER_SIZE;
+    size_t data_block_start = HEADER_SIZE + ENTRY_SIZE * (size_t)entries;
+    size_t data_block_size = archive_size - data_block_start;
+    size_t kept_entries = 0;
+    size_t kept_data_size = 0;
+    bool success = false;
+    size_t i;
+
     for (i = 0; i < entries; i++) {
-        uint8_t name_len = archive_data[entry_offset];
+        uint8_t *entry = entry_table + ENTRY_SIZE * i;
+        uint8_t name_len = entry[0];
         if (name_len > MAX_NAME_LEN) {
-            entry_offset += ENTRY_SIZE;
-            continue;
+            fprintf(stderr, "Invalid name length in entry %zu\n", i);
+            goto cleanup;
         }
-        
+
         char name[248];
-        memcpy(name, archive_data + entry_offset + 1, name_len);
+        memcpy(name, entry + 1, name_len);
         name[name_len] = '\0';
-        
-        /* Check if this file should be deleted */
-        /* Match by exact name (like ar command) */
-        bool should_delete = false;
+
+        /* Match by exact name. */
         int j;
         for (j = 0; j < file_count; j++) {
             if (strcmp(name, files_to_delete[j]) == 0) {
-                should_delete = true;
-                deleted_count++;
-                if (options & OPT_V) {
-                    printf("d - %s\n", name);
-                }
                 break;
             }
         }
-        
-        if (!should_delete) {
-            /* Keep this file - read its contents */
-            uint32_t contents_offset = read_u32_le(archive_data + entry_offset + 248);
-            uint32_t contents_len = read_u32_le(archive_data + entry_offset + 252);
-            size_t actual_offset = data_block_start + contents_offset;
-            
-            if (actual_offset + contents_len > archive_size) {
-                fprintf(stderr, "Warning: Invalid entry, skipping: %s\n", name);
-                entry_offset += ENTRY_SIZE;
-                continue;
+        if (j < file_count) {
+            if (options & OPT_V) {
+                printf("d - %s\n", name);
             }
-            
-            char *content = malloc(contents_len);
-            if (content) {
-                memcpy(content, archive_data + actual_offset, contents_len);
-                
-                files.paths[files.count] = NULL;
-#ifdef HAVE_STRDUP
-                files.names[files.count] = strdup(name);
-#else
-                size_t name_len_dup = strlen(name) + 1;
-                files.names[files.count] = malloc(name_len_dup);
-                if (files.names[files.count]) {
-                    memcpy(files.names[files.count], name, name_len_dup);
-                }
-#endif
-                files.contents[files.count] = content;
-                files.sizes[files.count] = contents_len;
-                files.count++;
-            }
+            continue;
         }
-        
-        entry_offset += ENTRY_SIZE;
+
+        uint32_t contents_offset = read_u32_le(entry + 248);
+        uint32_t contents_len = read_u32_le(entry + 252);
+        if (contents_offset > data_block_size || contents_len > data_block_size - contents_offset) {
+            fprintf(stderr, "Archive corrupted: file %s out of bounds\n", name);
+            goto cleanup;
+        }
+        if (kept_data_size > UINT32_MAX || contents_len > SIZE_MAX - kept_data_size) {
+            fprintf(stderr, "Resulting archive is too large\n");
+            goto cleanup;
+        }
+
+        /* Compact the table in memory while the original payloads stay in place. */
+        memmove(entry_table + ENTRY_SIZE * kept_entries, entry, ENTRY_SIZE);
+        kept_entries++;
+        kept_data_size += contents_len;
     }
-    
-    free(archive_data);
-    
-    if (deleted_count == 0) {
+
+    if (kept_entries == entries) {
         fprintf(stderr, "No files deleted (files not found in archive)\n");
-        file_list_free(&files);
-        return false;
+        goto cleanup;
     }
-    
-    /* Recreate archive with remaining files */
-    if (files.count == 0) {
+
+    if (kept_entries == 0) {
         fprintf(stderr, "Warning: All files deleted, archive will be empty\n");
     }
-    
-    /* Calculate total size needed */
-    size_t header_and_entries_size = HEADER_SIZE + (ENTRY_SIZE * files.count);
-    size_t data_offset = header_and_entries_size;
-    size_t total_data_size = 0;
-    
-    for (i = 0; i < files.count; i++) {
-        total_data_size += files.sizes[i];
+
+    size_t data_offset = HEADER_SIZE + ENTRY_SIZE * kept_entries;
+    if (kept_data_size > SIZE_MAX - data_offset) {
+        fprintf(stderr, "Resulting archive is too large\n");
+        goto cleanup;
     }
-    
-    size_t total_size = header_and_entries_size + total_data_size;
+
+    size_t total_size = data_offset + kept_data_size;
     uint8_t *archive = malloc(total_size);
     if (!archive) {
         fprintf(stderr, "Memory allocation failed\n");
-        file_list_free(&files);
-        return false;
+        goto cleanup;
     }
-    
-    memset(archive, 0, total_size);
-    
-    /* Write header */
-    write_u64_le(archive, MAGIC);
-    write_u32_le(archive + 8, (uint32_t)files.count);
-    write_u32_le(archive + 12, ARCHIVE_VERSION);
-    
-    /* Write entry descriptors and calculate offsets */
-    entry_offset = HEADER_SIZE;
-    size_t data_pos = data_offset;
-    
-    for (i = 0; i < files.count; i++) {
-        uint8_t name_len_val = (uint8_t)strlen(files.names[i]);
-        archive[entry_offset] = name_len_val;
-        
-        memcpy(archive + entry_offset + 1, files.names[i], name_len_val);
-        /* Rest is already zeroed */
-        
-        /* contents_offset is relative to data block start */
-        write_u32_le(archive + entry_offset + 248, (uint32_t)(data_pos - data_offset));
-        write_u32_le(archive + entry_offset + 252, (uint32_t)files.sizes[i]);
-        
-        data_pos += files.sizes[i];
-        entry_offset += ENTRY_SIZE;
+
+    memcpy(archive, archive_data, data_offset);
+    write_u32_le(archive + 8, (uint32_t)kept_entries);
+
+    size_t contents_pos = 0;
+    for (i = 0; i < kept_entries; i++) {
+        uint8_t *entry = archive + HEADER_SIZE + ENTRY_SIZE * i;
+        uint32_t contents_offset = read_u32_le(entry + 248);
+        uint32_t contents_len = read_u32_le(entry + 252);
+        memcpy(archive + data_offset + contents_pos,
+               archive_data + data_block_start + contents_offset, contents_len);
+        write_u32_le(entry + 248, (uint32_t)contents_pos);
+        contents_pos += contents_len;
     }
-    
-    /* Write file contents */
-    data_pos = data_offset;
-    for (i = 0; i < files.count; i++) {
-        memcpy(archive + data_pos, files.contents[i], files.sizes[i]);
-        data_pos += files.sizes[i];
-    }
-    
-    bool success = write_file(archive_path, archive, total_size);
-    
+
+    success = write_file(archive_path, archive, total_size);
     free(archive);
-    file_list_free(&files);
-    
+
+cleanup:
+    free(archive_data);
     return success;
 }
 

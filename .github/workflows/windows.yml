@@ -32,11 +32,18 @@ jobs:
     needs: detect-version
     strategy:
       matrix:
-        arch: [x86, x86_64, arm64]
-    runs-on: windows-latest
+        include:
+          - arch: x86
+            runner: windows-latest
+          - arch: x86_64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup MSYS2
+        if: matrix.arch != 'arm64'
         uses: msys2/setup-msys2@v2
         with:
           update: true
@@ -49,13 +56,24 @@ jobs:
             mingw-w64-i686-gcc
             mingw-w64-ucrt-x86_64-gcc
             clang
+      - name: Setup MSYS2 (ARM64)
+        if: matrix.arch == 'arm64'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: >-
+            autoconf
+            automake
+            make
+            mingw-w64-clang-aarch64-clang
       - name: Configure and build (x86_64)
         if: matrix.arch == 'x86_64'
         shell: msys2 {0}
         run: |
           export PATH="/mingw64/bin:$PATH"
           autoreconf -fiv
-          ./configure --prefix=/usr CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
+          ./configure --prefix=/usr CFLAGS="-O3" CXXFLAGS="-O3"
           make -j$(nproc) || make
       - name: Configure and build (x86)
         if: matrix.arch == 'x86'
@@ -69,9 +87,8 @@ jobs:
         if: matrix.arch == 'arm64'
         shell: msys2 {0}
         run: |
-          export PATH="/ucrt64/bin:$PATH"
           autoreconf -fiv
-          ./configure --prefix=/usr --host=aarch64-w64-mingw32 CFLAGS="-O3" CXXFLAGS="-O3"
+          ./configure --prefix=/usr CC=clang AR=llvm-ar CFLAGS="-O3"
           make -j$(nproc) || make
       - name: Install
         shell: msys2 {0}
